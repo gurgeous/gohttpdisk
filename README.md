@@ -1,5 +1,7 @@
 ### Overview
 
+![badge](https://github.com/gurgeous/httpdisk/workflows/Test/badge.svg)
+
 `httpdisk` will cache http responses on disk. Several of these already exist (see below) but this one is a bit different. The priority for `httpdisk` is to always cache on disk. It is not RFC compliant. It caches GET, POST and everything else. httpdisk is useful for crawling projects, to aggressively avoid extra http requests.
 
 ### Getting Started
