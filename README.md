@@ -1,10 +1,10 @@
-### Overview
-
 ![badge](https://github.com/gurgeous/httpdisk/workflows/Test/badge.svg)
+
+### Overview
 
 `httpdisk` will cache http responses on disk. Several of these already exist (see below) but this one is a bit different. The priority for `httpdisk` is to always cache on disk. It is not RFC compliant. It caches GET, POST and everything else. httpdisk is useful for crawling projects, to aggressively avoid extra http requests.
 
-### Getting Started
+### Usage
 
 Just plug httpdisk into an http.Client:
 
@@ -21,7 +21,7 @@ Note that HTTP headers are NOT used to calculate the cache key. This can be unin
 
 ### Also See
 
-Here are other caching libraries that may meet your needs. These generally act more like normal HTTP caches:
+Here are some other excellent caching libraries that you might want to check out. These generally act like traditional HTTP caches:
 
 - [https://github.com/bxcodec/httpcache](https://github.com/bxcodec/httpcache)
 - [https://github.com/gregjones/httpcache](https://github.com/gregjones/httpcache)
