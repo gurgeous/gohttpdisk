@@ -1,6 +1,7 @@
 package httpdisk
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -79,18 +80,20 @@ func TestCacheKeys(t *testing.T) {
 }
 
 func TestCacheHost(t *testing.T) {
+
 	// w/o host
 	path1 := NewCache("/tmp/test-httpdisk", false).Path(req("GET", "http://a.com"))
-	if strings.Contains(path1, "/a.com/") {
-		t.Fatalf("path %s shouldn't contain /a.com/", path1)
+	hostDir := fmt.Sprintf("%ca.com%c", os.PathSeparator, os.PathSeparator)
+	if strings.Contains(path1, hostDir) {
+		t.Fatalf("path %s shouldn't contain %s", path1, hostDir)
 	}
 
 	// w/ host
 	urls := []string{"http://a.com", "http://www.a~~.com"}
 	for _, url := range urls {
 		path := NewCache("/tmp/test-httpdisk", true).Path(req("GET", url))
-		if !strings.Contains(path, "/a.com/") {
-			t.Fatalf("path %s for url %s should contain /a.com/", path, url)
+		if !strings.Contains(path, hostDir) {
+			t.Fatalf("path %s for url %s should contain %s", path, url, hostDir)
 		}
 	}
 }
