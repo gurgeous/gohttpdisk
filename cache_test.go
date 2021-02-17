@@ -8,16 +8,17 @@ import (
 )
 
 func TestCacheGet(t *testing.T) {
-	c := NewCache("test-cache")
+	c := NewCache("/tmp/test-httpdisk", true)
 	os.RemoveAll(c.Dir)
-	defer os.RemoveAll(c.Dir)
-
-	req, _ := http.NewRequest("GET", "http://a.com/b", nil)
+	if os.Getenv("HTTPDISK_DEBUG") == "" {
+		defer os.RemoveAll(c.Dir)
+	}
 
 	//
 	// get (not found)
 	//
 
+	req := req("GET", "http://a.com/b")
 	data, err := c.Get(req)
 	if len(data) != 0 {
 		t.Fatal("Get - data should be empty")
@@ -41,12 +42,8 @@ func TestCacheGet(t *testing.T) {
 
 // key normalization
 func TestCacheKeys(t *testing.T) {
-	c := NewCache("test-cache")
+	c := NewCache("/tmp/test-httpdisk", true)
 
-	req := func(method string, url string) *http.Request {
-		r, _ := http.NewRequest(method, url, nil)
-		return r
-	}
 	assertMatch := func(a *http.Request, b *http.Request) {
 		c1 := c.Canonical(a)
 		c2 := c.Canonical(b)
@@ -79,4 +76,27 @@ func TestCacheKeys(t *testing.T) {
 	req1, _ := http.NewRequest("POST", "http://a.com", strings.NewReader("abc"))
 	req2, _ := http.NewRequest("POST", "http://a.com", strings.NewReader("def"))
 	assertDiffer(req1, req2)
+}
+
+func TestCacheHost(t *testing.T) {
+	// w/o host
+	path1 := NewCache("/tmp/test-httpdisk", false).Path(req("GET", "http://a.com"))
+	if strings.Contains(path1, "/a.com/") {
+		t.Fatalf("path %s shouldn't contain /a.com/", path1)
+	}
+
+	// w/ host
+	urls := []string{"http://a.com", "http://www.a~~.com"}
+	for _, url := range urls {
+		path := NewCache("/tmp/test-httpdisk", true).Path(req("GET", url))
+		if !strings.Contains(path, "/a.com/") {
+			t.Fatalf("path %s for url %s should contain /a.com/", path, url)
+		}
+	}
+}
+
+// create a test request
+func req(method string, url string) *http.Request {
+	r, _ := http.NewRequest(method, url, nil)
+	return r
 }

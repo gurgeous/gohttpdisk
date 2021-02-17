@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -15,23 +16,25 @@ import (
 // Cache will cache http.Responses on disk, using the http.Request to calculate
 // a key. It mainly deals with keys and files, not the network.
 type Cache struct {
-	Dir string
+	Dir  string
+	Host bool
 }
 
-// NewCache creates a new Cache. Files will be stored in dir.
-func NewCache(dir string) *Cache {
-	return &Cache{dir}
+// NewCache creates a new Cache. Files will be stored in dir. If host is
+// true, the hostname is used in the path as well.
+func NewCache(dir string, host bool) *Cache {
+	return &Cache{dir, host}
 }
 
 // Get the cached data for a request. An empty byte array will be returned if
 // the entry doesn't exist or can't be read for any reason.
 func (c *Cache) Get(req *http.Request) ([]byte, error) {
-	return ioutil.ReadFile(c.RequestPath(req))
+	return ioutil.ReadFile(c.Path(req))
 }
 
 // Set cached data for a request.
 func (c *Cache) Set(req *http.Request, data []byte) error {
-	path := c.RequestPath(req)
+	path := c.Path(req)
 
 	// make sure directory exists
 	if err := os.MkdirAll(filepath.Dir(path), os.ModePerm); err != nil {
@@ -53,15 +56,28 @@ func (c *Cache) Set(req *http.Request, data []byte) error {
 	return nil
 }
 
-// RequestKey returns the md5 sum for this request.
-func (c *Cache) RequestKey(req *http.Request) string {
+// Key returns the md5 sum for this request.
+func (c *Cache) Key(req *http.Request) string {
 	return md5String(c.Canonical(req))
 }
 
-// RequestPath returns the full path on disk for this request.
-func (c *Cache) RequestPath(req *http.Request) string {
-	key := c.RequestKey(req)
-	return filepath.Join(c.Dir, key[0:2], key[2:4], key[4:])
+var hostReplaceRe = regexp.MustCompile(`^(www\.)`)
+
+// Path returns the full path on disk for this request.
+func (c *Cache) Path(req *http.Request) string {
+	paths := []string{}
+	paths = append(paths, c.Dir)
+
+	if c.Host {
+		paths = append(paths, normalizeHostForPath(req.URL.Hostname()))
+	}
+
+	key := c.Key(req)
+	paths = append(paths, key[0:2])
+	paths = append(paths, key[2:4])
+	paths = append(paths, key[4:])
+
+	return filepath.Join(paths...)
 }
 
 var ports = map[string]string{
@@ -115,6 +131,19 @@ func (c *Cache) Canonical(req *http.Request) string {
 	}
 
 	return strings.Join(parts, "")
+}
+
+var (
+	hostWwwRe   = regexp.MustCompile(`^(www\.)`)
+	hostCharsRe = regexp.MustCompile("[^A-Za-z0-9._-]+")
+)
+
+// Normalize a hostname. Collisions are ok because the rest of the path is an
+// md5 checksum.
+func normalizeHostForPath(s string) string {
+	s = hostWwwRe.ReplaceAllString(s, "")
+	s = hostCharsRe.ReplaceAllString(s, "")
+	return s
 }
 
 func md5String(text string) string {

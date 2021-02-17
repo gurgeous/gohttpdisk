@@ -8,10 +8,11 @@ import (
 )
 
 func TestHTTPDisk(t *testing.T) {
-	hd := NewHTTPDisk("test-httpdisk")
+	hd := NewHTTPDisk("/tmp/test-httpdisk", true)
 	os.RemoveAll(hd.Cache.Dir)
-	defer os.RemoveAll(hd.Cache.Dir)
-
+	if os.Getenv("HTTPDISK_DEBUG") == "" {
+		defer os.RemoveAll(hd.Cache.Dir)
+	}
 	client := http.Client{Transport: hd}
 
 	drainBody := func(resp *http.Response) string {

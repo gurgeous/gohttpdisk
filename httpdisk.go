@@ -16,9 +16,10 @@ type HTTPDisk struct {
 	Transport http.RoundTripper
 }
 
-// NewHTTPDisk creates a new HTTPDisk. Responses are written to dir.
-func NewHTTPDisk(dir string) *HTTPDisk {
-	c := NewCache(dir)
+// NewHTTPDisk creates a new HTTPDisk. Responses are written to dir. If host is
+// true, the hostname is used in the path as well.
+func NewHTTPDisk(dir string, host bool) *HTTPDisk {
+	c := NewCache(dir, host)
 	return &HTTPDisk{Cache: c}
 }
 
