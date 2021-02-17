@@ -9,11 +9,9 @@ import (
 )
 
 func TestCacheGet(t *testing.T) {
-	c := NewCache("/tmp/test-httpdisk", true)
-	os.RemoveAll(c.Dir)
-	if os.Getenv("HTTPDISK_DEBUG") == "" {
-		defer os.RemoveAll(c.Dir)
-	}
+	c := newCache(Options{})
+	c.RemoveAll()
+	defer c.RemoveAll()
 
 	//
 	// get (not found)
@@ -43,7 +41,7 @@ func TestCacheGet(t *testing.T) {
 
 // key normalization
 func TestCacheKeys(t *testing.T) {
-	c := NewCache("/tmp/test-httpdisk", true)
+	c := newCache(Options{})
 
 	assertMatch := func(a *http.Request, b *http.Request) {
 		c1 := c.Canonical(a)
@@ -80,18 +78,18 @@ func TestCacheKeys(t *testing.T) {
 }
 
 func TestCacheHost(t *testing.T) {
-
-	// w/o host
-	path1 := NewCache("/tmp/test-httpdisk", false).Path(req("GET", "http://a.com"))
 	hostDir := fmt.Sprintf("%ca.com%c", os.PathSeparator, os.PathSeparator)
+
+	// w/o HostInPath
+	path1 := newCache(Options{}).Path(req("GET", "http://a.com"))
 	if strings.Contains(path1, hostDir) {
 		t.Fatalf("path %s shouldn't contain %s", path1, hostDir)
 	}
 
-	// w/ host
+	// w/ HostInPath
 	urls := []string{"http://a.com", "http://www.a~~.com"}
 	for _, url := range urls {
-		path := NewCache("/tmp/test-httpdisk", true).Path(req("GET", url))
+		path := newCache(Options{HostInPath: true}).Path(req("GET", url))
 		if !strings.Contains(path, hostDir) {
 			t.Fatalf("path %s for url %s should contain %s", path, url, hostDir)
 		}

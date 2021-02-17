@@ -14,16 +14,19 @@ import (
 )
 
 // Cache will cache http.Responses on disk, using the http.Request to calculate
-// a key. It mainly deals with keys and files, not the network.
+// a key. It deals with keys and files, not the network.
 type Cache struct {
-	Dir  string
-	Host bool
+	// Directory where the cache is stored. Defaults to httpdisk.
+	Dir string
+	// If true, include the request hostname in the path for each element.
+	HostInPath bool
 }
 
-// NewCache creates a new Cache. Files will be stored in dir. If host is
-// true, the hostname is used in the path as well.
-func NewCache(dir string, host bool) *Cache {
-	return &Cache{dir, host}
+func newCache(options Options) *Cache {
+	if options.Dir == "" {
+		options.Dir = "httpdisk"
+	}
+	return &Cache{options.Dir, options.HostInPath}
 }
 
 // Get the cached data for a request. An empty byte array will be returned if
@@ -41,8 +44,8 @@ func (c *Cache) Set(req *http.Request, data []byte) error {
 		return err
 	}
 
-	// write to tmp file
-	tmp := fmt.Sprintf("%s/.tmp-%s", filepath.Dir(path), filepath.Base(path))
+	// write to tmp file in same directory
+	tmp := filepath.Join(filepath.Dir(path), fmt.Sprintf(".tmp-%s", filepath.Base(path)))
 	if err := ioutil.WriteFile(tmp, data, 0644); err != nil {
 		return err
 	}
@@ -61,23 +64,30 @@ func (c *Cache) Key(req *http.Request) string {
 	return md5String(c.Canonical(req))
 }
 
-var hostReplaceRe = regexp.MustCompile(`^(www\.)`)
-
 // Path returns the full path on disk for this request.
 func (c *Cache) Path(req *http.Request) string {
 	paths := []string{}
+
+	// Dir
 	paths = append(paths, c.Dir)
 
-	if c.Host {
+	// HostInPath
+	if c.HostInPath {
 		paths = append(paths, normalizeHostForPath(req.URL.Hostname()))
 	}
 
+	// Key
 	key := c.Key(req)
 	paths = append(paths, key[0:2])
 	paths = append(paths, key[2:4])
 	paths = append(paths, key[4:])
 
 	return filepath.Join(paths...)
+}
+
+// RemoveAll unlinks the cache.
+func (c *Cache) RemoveAll() error {
+	return os.RemoveAll(c.Dir)
 }
 
 var ports = map[string]string{

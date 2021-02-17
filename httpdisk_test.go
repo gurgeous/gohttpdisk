@@ -3,16 +3,14 @@ package httpdisk
 import (
 	"io/ioutil"
 	"net/http"
-	"os"
 	"testing"
 )
 
 func TestHTTPDisk(t *testing.T) {
-	hd := NewHTTPDisk("/tmp/test-httpdisk", true)
-	os.RemoveAll(hd.Cache.Dir)
-	if os.Getenv("HTTPDISK_DEBUG") == "" {
-		defer os.RemoveAll(hd.Cache.Dir)
-	}
+	hd := NewHTTPDisk(Options{})
+	hd.Cache.RemoveAll()
+	defer hd.Cache.RemoveAll()
+
 	client := http.Client{Transport: hd}
 
 	drainBody := func(resp *http.Response) string {

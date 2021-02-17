@@ -11,16 +11,22 @@ import (
 // HTTPDisk is a caching http transport.
 type HTTPDisk struct {
 	// Underlying Cache.
-	Cache *Cache
+	Cache Cache
 	// if nil, http.DefaultTransport is used.
 	Transport http.RoundTripper
 }
 
-// NewHTTPDisk creates a new HTTPDisk. Responses are written to dir. If host is
-// true, the hostname is used in the path as well.
-func NewHTTPDisk(dir string, host bool) *HTTPDisk {
-	c := NewCache(dir, host)
-	return &HTTPDisk{Cache: c}
+// Options for creating a new HTTPDisk.
+type Options struct {
+	// Directory where the cache is stored. Defaults to httpdisk.
+	Dir string
+	// If true, include the request hostname in the path for each element.
+	HostInPath bool
+}
+
+// NewHTTPDisk constructs a new HTTPDisk.
+func NewHTTPDisk(options Options) *HTTPDisk {
+	return &HTTPDisk{Cache: *newCache(options)}
 }
 
 // RoundTrip is the entry point used by http.Client.
