@@ -1,3 +1,3 @@
-module httpdisk
+module module github.com/gurgeous/httpdisk
 
 go 1.15
