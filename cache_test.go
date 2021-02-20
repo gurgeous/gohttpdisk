@@ -80,19 +80,19 @@ func TestCacheKeys(t *testing.T) {
 func TestCacheHost(t *testing.T) {
 	hostDir := fmt.Sprintf("%ca.com%c", os.PathSeparator, os.PathSeparator)
 
-	// w/o HostInPath
-	path1 := newCache(Options{}).Path(req("GET", "http://a.com"))
-	if strings.Contains(path1, hostDir) {
-		t.Fatalf("path %s shouldn't contain %s", path1, hostDir)
-	}
-
-	// w/ HostInPath
+	// w/o NoHosts
 	urls := []string{"http://a.com", "http://www.a~~.com"}
 	for _, url := range urls {
-		path := newCache(Options{HostInPath: true}).Path(req("GET", url))
+		path := newCache(Options{}).Path(req("GET", url))
 		if !strings.Contains(path, hostDir) {
 			t.Fatalf("path %s for url %s should contain %s", path, url, hostDir)
 		}
+	}
+
+	// w/ NoHosts
+	path1 := newCache(Options{NoHosts: true}).Path(req("GET", "http://a.com"))
+	if strings.Contains(path1, hostDir) {
+		t.Fatalf("path %s shouldn't contain %s", path1, hostDir)
 	}
 }
 

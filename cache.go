@@ -19,15 +19,15 @@ import (
 type Cache struct {
 	// Directory where the cache is stored. Defaults to httpdisk.
 	Dir string
-	// If true, include the request hostname in the path for each element.
-	HostInPath bool
+	// If true, don't include the request hostname in the path for each element.
+	NoHosts bool
 }
 
 func newCache(options Options) *Cache {
 	if options.Dir == "" {
 		options.Dir = "httpdisk"
 	}
-	return &Cache{options.Dir, options.HostInPath}
+	return &Cache{options.Dir, options.NoHosts}
 }
 
 // Get the cached data for a request. An empty byte array will be returned if
@@ -98,8 +98,8 @@ func (c *Cache) Path(req *http.Request) string {
 	// Dir
 	paths = append(paths, c.Dir)
 
-	// HostInPath
-	if c.HostInPath {
+	// NoHosts: true
+	if !c.NoHosts {
 		paths = append(paths, normalizeHostForPath(req.URL.Hostname()))
 	}
 

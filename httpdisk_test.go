@@ -3,7 +3,9 @@ package httpdisk
 import (
 	"io/ioutil"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestHTTPDisk(t *testing.T) {
@@ -51,5 +53,31 @@ func TestHTTPDisk(t *testing.T) {
 	}
 	if date1 != date2 {
 		t.Fatalf("Second GET had different date %s != %s", date1, date2)
+	}
+}
+
+func TestHTTPDiskErrors(t *testing.T) {
+	hd := NewHTTPDisk(Options{})
+	hd.Cache.RemoveAll()
+	// defer hd.Cache.RemoveAll()
+
+	var err error
+
+	client := http.Client{Transport: hd, Timeout: time.Second * 1}
+
+	// bad host
+	url := "http://bogus.bogus"
+	client.Get(url)
+	_, err = client.Get(url)
+	if !strings.Contains(err.Error(), "(cached)") {
+		t.Fatalf("%s error was not cached", url)
+	}
+
+	// timeout
+	url = "http://localhost:1"
+	client.Get(url)
+	_, err = client.Get(url)
+	if !strings.Contains(err.Error(), "(cached)") {
+		t.Fatalf("%s error was not cached", url)
 	}
 }
