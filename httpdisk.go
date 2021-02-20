@@ -55,8 +55,11 @@ func (hd *HTTPDisk) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err = transport.RoundTrip(req)
 	if err != nil {
 		if isCacheableError(err) {
-			err = hd.setError(req, err)
-			return nil, err
+			err2 := hd.setError(req, err)
+			if err2 != nil {
+				// error whil caching, give the caller a chance to see it
+				err = err2
+			}
 		}
 		return nil, err
 	}

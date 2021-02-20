@@ -65,7 +65,16 @@ func TestHTTPDiskErrors(t *testing.T) {
 
 	client := http.Client{Transport: hd, Timeout: time.Millisecond * 500}
 
-	url := "http://httpbin.org/delay/1"
+	// bad host
+	url := "http://bogus.bogus"
+	client.Get(url)
+	_, err = client.Get(url)
+	if !strings.Contains(err.Error(), "(cached)") {
+		t.Fatalf("%s error was not cached", url)
+	}
+
+	// timeout
+	url = "http://httpbin.org/delay/1"
 	client.Get(url)
 	_, err = client.Get(url)
 	if !strings.Contains(err.Error(), "(cached)") {
