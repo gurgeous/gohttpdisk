@@ -1,6 +1,7 @@
 package httpdisk
 
 import (
+	"compress/gzip"
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
@@ -32,7 +33,19 @@ func newCache(options Options) *Cache {
 // Get the cached data for a request. An empty byte array will be returned if
 // the entry doesn't exist or can't be read for any reason.
 func (c *Cache) Get(req *http.Request) ([]byte, error) {
-	return ioutil.ReadFile(c.Path(req))
+	f, err := os.Open(c.Path(req))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return nil, err
+	}
+	defer gz.Close()
+
+	return ioutil.ReadAll(gz)
 }
 
 // Set cached data for a request.
@@ -46,10 +59,24 @@ func (c *Cache) Set(req *http.Request, data []byte) error {
 
 	// write to tmp file in same directory
 	tmp := filepath.Join(filepath.Dir(path), fmt.Sprintf(".tmp-%s", filepath.Base(path)))
-	if err := ioutil.WriteFile(tmp, data, 0644); err != nil {
+	f, err := os.Create(tmp)
+	if err != nil {
 		return err
 	}
 	defer os.Remove(tmp)
+
+	// write compressed data
+	gz := gzip.NewWriter(f)
+	if _, err := gz.Write(data); err != nil {
+		return err
+	}
+	if err := gz.Close(); err != nil {
+		return err
+	}
+
+	if err := f.Close(); err != nil {
+		return err
+	}
 
 	// move into place
 	if err := os.Rename(tmp, path); err != nil {
