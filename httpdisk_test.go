@@ -59,7 +59,7 @@ func TestHTTPDisk(t *testing.T) {
 func TestHTTPDiskErrors(t *testing.T) {
 	hd := NewHTTPDisk(Options{})
 	hd.Cache.RemoveAll()
-	// defer hd.Cache.RemoveAll()
+	defer hd.Cache.RemoveAll()
 
 	var err error
 
@@ -74,7 +74,7 @@ func TestHTTPDiskErrors(t *testing.T) {
 	}
 
 	// timeout
-	url = "http://localhost:1"
+	url = "http://httpbin.org/delay/2"
 	client.Get(url)
 	_, err = client.Get(url)
 	if !strings.Contains(err.Error(), "(cached)") {
