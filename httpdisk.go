@@ -52,14 +52,7 @@ func (hd *HTTPDisk) RoundTrip(req *http.Request) (*http.Response, error) {
 	// not found. make the request
 	resp, err = transport.RoundTrip(req)
 	if err != nil {
-		if isCacheableError(err) {
-			err2 := hd.setError(req, err)
-			if err2 != nil {
-				// error whil caching, give the caller a chance to see it
-				err = err2
-			}
-		}
-		return nil, err
+		return nil, hd.handleError(req, err)
 	}
 
 	// cache response
@@ -96,7 +89,9 @@ func (hd *HTTPDisk) set(req *http.Request, resp *http.Response) error {
 	// drain body
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return err
+		// errors can occur here if the server returns an invalid body. handle that
+		// case and consider caching the error
+		return hd.handleError(req, err)
 	}
 
 	// cache (w/ body)
@@ -113,6 +108,17 @@ func (hd *HTTPDisk) set(req *http.Request, resp *http.Response) error {
 	// restore body
 	resp.Body = ioutil.NopCloser(bytes.NewBuffer(body))
 	return nil
+}
+
+func (hd *HTTPDisk) handleError(req *http.Request, err error) error {
+	if isCacheableError(err) {
+		err2 := hd.setError(req, err)
+		if err2 != nil {
+			// error while caching, give the caller a chance to see it
+			err = err2
+		}
+	}
+	return err
 }
 
 // cache an error response
