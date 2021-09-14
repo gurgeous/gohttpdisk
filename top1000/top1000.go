@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gurgeous/httpdisk"
+	"github.com/gurgeous/gohttpdisk"
 	"golang.org/x/net/publicsuffix"
 )
 
@@ -33,8 +33,8 @@ func main() {
 	flag.Parse()
 
 	// setup the cache
-	dir := filepath.Join(os.Getenv("HOME"), "top1000-httpdisk")
-	hd := httpdisk.NewHTTPDisk(httpdisk.Options{Dir: dir})
+	dir := filepath.Join(os.Getenv("HOME"), "top1000-gohttpdisk")
+	hd := gohttpdisk.NewHTTPDisk(gohttpdisk.Options{Dir: dir})
 	if noNet {
 		hd.Transport = &panicTransport{}
 	}

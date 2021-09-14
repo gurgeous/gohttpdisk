@@ -1,4 +1,4 @@
-package httpdisk
+package gohttpdisk
 
 import (
 	"fmt"

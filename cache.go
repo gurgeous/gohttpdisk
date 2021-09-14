@@ -1,4 +1,4 @@
-package httpdisk
+package gohttpdisk
 
 import (
 	"compress/gzip"
@@ -17,7 +17,7 @@ import (
 // Cache will cache http.Responses on disk, using the http.Request to calculate
 // a key. It deals with keys and files, not the network.
 type Cache struct {
-	// Directory where the cache is stored. Defaults to httpdisk.
+	// Directory where the cache is stored. Defaults to gohttpdisk.
 	Dir string
 	// If true, don't include the request hostname in the path for each element.
 	NoHosts bool
@@ -25,7 +25,7 @@ type Cache struct {
 
 func newCache(options Options) *Cache {
 	if options.Dir == "" {
-		options.Dir = "httpdisk"
+		options.Dir = "gohttpdisk"
 	}
 	return &Cache{options.Dir, options.NoHosts}
 }
