@@ -143,6 +143,7 @@ var cacheableErrors = []string{
 	"context deadline exceeded",
 	"EOF",
 	"handshake failure",
+	"i/o timeout",
 	"no route to host",
 	"no such host",
 	"request canceled",
