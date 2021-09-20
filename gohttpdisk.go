@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"strings"
+	"time"
 )
 
 // HTTPDisk is a caching http transport.
@@ -22,8 +23,6 @@ type HTTPDisk struct {
 type Options struct {
 	// Directory where the cache is stored. Defaults to httpdisk.
 	Dir string
-	// If true, include the request hostname in the path for each element.
-	NoHosts bool
 }
 
 const errPrefix = "err:"
@@ -50,13 +49,14 @@ func (hd *HTTPDisk) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	// not found. make the request
+	start := time.Now()
 	resp, err = transport.RoundTrip(req)
 	if err != nil {
 		return nil, hd.handleError(req, err)
 	}
 
 	// cache response
-	err = hd.set(req, resp)
+	err = hd.set(req, resp, start)
 	if err != nil {
 		return nil, err
 	}
@@ -85,17 +85,22 @@ func (hd *HTTPDisk) get(req *http.Request) (*http.Response, error) {
 }
 
 // set cached response
-func (hd *HTTPDisk) set(req *http.Request, resp *http.Response) error {
-	// drain body
+func (hd *HTTPDisk) set(req *http.Request, resp *http.Response, start time.Time) error {
+	// drain body, put back into Response
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		// errors can occur here if the server returns an invalid body. handle that
 		// case and consider caching the error
 		return hd.handleError(req, err)
 	}
-
-	// cache (w/ body)
 	resp.Body = ioutil.NopCloser(bytes.NewBuffer(body))
+	elapsed := float64(time.Since(start)) / float64(time.Second)
+
+	// add our headers
+	resp.Header.Set("X-Gohttpdisk-Elapsed", fmt.Sprintf("%0.3f", elapsed))
+	resp.Header.Set("X-Gohttpdisk-Url", req.URL.String())
+
+	// now cache bytes
 	data, err := httputil.DumpResponse(resp, true)
 	if err != nil {
 		return err

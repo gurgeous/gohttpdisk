@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -19,15 +20,13 @@ import (
 type Cache struct {
 	// Directory where the cache is stored. Defaults to gohttpdisk.
 	Dir string
-	// If true, don't include the request hostname in the path for each element.
-	NoHosts bool
 }
 
 func newCache(options Options) *Cache {
 	if options.Dir == "" {
 		options.Dir = "gohttpdisk"
 	}
-	return &Cache{options.Dir, options.NoHosts}
+	return &Cache{options.Dir}
 }
 
 // Get the cached data for a request. An empty byte array will be returned if
@@ -97,11 +96,7 @@ func (c *Cache) Path(req *http.Request) string {
 
 	// Dir
 	paths = append(paths, c.Dir)
-
-	// NoHosts: true
-	if !c.NoHosts {
-		paths = append(paths, normalizeHostForPath(req.URL.Hostname()))
-	}
+	paths = append(paths, normalizeHostForPath(req.URL.Hostname()))
 
 	// Key
 	key := c.Key(req)
@@ -126,48 +121,65 @@ var ports = map[string]string{
 // the normalized URL, and the request body if present. The signature can be
 // quite long since it contains the request body.
 func (c *Cache) Canonical(req *http.Request) string {
+	method := strings.ToUpper(req.Method)
+	if method == "" {
+		method = "GET"
+	}
+
 	scheme := strings.ToLower(req.URL.Scheme)
 	port := req.URL.Port()
 	if port == "" {
 		port = ports[scheme]
 	}
+
 	path := req.URL.Path
 	if path == "" {
 		path = "/"
 	}
 
-	parts := make([]string, 10)
-	parts = append(parts, req.Method)
-	parts = append(parts, " ")
-	parts = append(parts, scheme)
-	parts = append(parts, "://")
-	parts = append(parts, strings.ToLower(req.URL.Hostname()))
-	parts = append(parts, ":")
-	parts = append(parts, port)
-	parts = append(parts, path)
-
-	// sort query
+	key := make([]string, 12)
+	key = append(key, method)
+	key = append(key, " ")
+	key = append(key, scheme)
+	key = append(key, "://")
+	key = append(key, strings.ToLower(req.URL.Hostname()))
+	if port != ports[scheme] {
+		key = append(key, ":")
+		key = append(key, port)
+	}
+	if path != "/" {
+		key = append(key, path)
+	}
 	if query := req.URL.Query(); len(query) > 0 {
-		parts = append(parts, "?")
-		for key := range query {
-			sort.Strings(query[key])
-		}
-		parts = append(parts, query.Encode()) // note: sorts by key
+		key = append(key, "?")
+		key = append(key, c.Querykey(query))
 	}
-
-	// add body
 	if req.GetBody != nil {
-		reader, err := req.GetBody()
-		if err == nil {
-			defer reader.Close()
-			data, err := ioutil.ReadAll(reader)
-			if err == nil {
-				parts = append(parts, string(data))
-			}
-		}
+		key = append(key, " ")
+		key = append(key, c.Bodykey(req))
 	}
 
-	return strings.Join(parts, "")
+	return strings.Join(key, "")
+}
+
+func (c *Cache) Querykey(query url.Values) string {
+	for key := range query {
+		sort.Strings(query[key])
+	}
+	return query.Encode() // note: sorts by key
+}
+
+func (c *Cache) Bodykey(req *http.Request) string {
+	reader, err := req.GetBody()
+	if err != nil {
+		return ""
+	}
+	defer reader.Close()
+	data, err := ioutil.ReadAll(reader)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 var (
