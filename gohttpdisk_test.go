@@ -6,10 +6,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestHTTPDisk(t *testing.T) {
-	hd := NewHTTPDisk(Options{})
+	hd := NewHTTPDisk(Options{Dir: TmpDir()})
 	hd.Cache.RemoveAll()
 	defer hd.Cache.RemoveAll()
 
@@ -24,10 +26,10 @@ func TestHTTPDisk(t *testing.T) {
 	}
 
 	//
-	// 1. first get (not cached)
+	// 1. miss
 	//
 
-	url := "http://httpbin.org/anything"
+	url := "http://httpbingo.org/get"
 	resp, err := client.Get(url)
 	if err != nil {
 		t.Fatalf("Get %s failed %s", url, err)
@@ -37,7 +39,7 @@ func TestHTTPDisk(t *testing.T) {
 	date1 := resp.Header.Get("Date")
 
 	//
-	// 2. second get (cached)
+	// 2. hit
 	//
 
 	resp, err = client.Get(url)
@@ -45,19 +47,12 @@ func TestHTTPDisk(t *testing.T) {
 		t.Fatalf("Get %s failed %s", url, err)
 	}
 	defer resp.Body.Close()
-	body2 := drainBody(resp)
-	date2 := resp.Header.Get("Date")
-
-	if body1 != body2 {
-		t.Fatalf("Second GET had different body %s != %s", body1, body2)
-	}
-	if date1 != date2 {
-		t.Fatalf("Second GET had different date %s != %s", date1, date2)
-	}
+	assert.Equal(t, body1, drainBody(resp))
+	assert.Equal(t, date1, resp.Header.Get("Date"))
 }
 
 func TestHTTPDiskErrors(t *testing.T) {
-	hd := NewHTTPDisk(Options{})
+	hd := NewHTTPDisk(Options{Dir: TmpDir()})
 	hd.Cache.RemoveAll()
 	defer hd.Cache.RemoveAll()
 
@@ -74,10 +69,31 @@ func TestHTTPDiskErrors(t *testing.T) {
 	}
 
 	// timeout
-	url = "http://httpbin.org/delay/1"
+	url = "http://httpbingo.org/delay/1"
 	client.Get(url)
 	_, err = client.Get(url)
 	if !strings.Contains(err.Error(), "(cached)") {
 		t.Fatalf("%s error was not cached", url)
 	}
+}
+
+func TestHTTPDiskStatus(t *testing.T) {
+	hd := NewHTTPDisk(Options{Dir: TmpDir()})
+	hd.Cache.RemoveAll()
+	defer hd.Cache.RemoveAll()
+
+	// 1. miss
+	req := MustRequest("GET", "http://httpbingo.org/get")
+	status, _ := hd.Status(req)
+	assert.Equal(t, "miss", status.Status)
+
+	// 2. hit
+	MustWriteGzip(status.Path, "hello")
+	status, _ = hd.Status(req)
+	assert.Equal(t, "hit", status.Status)
+
+	// 3. error
+	MustWriteGzip(status.Path, "err:nope")
+	status, _ = hd.Status(req)
+	assert.Equal(t, "error", status.Status)
 }

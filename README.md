@@ -15,7 +15,7 @@ resp, err = client.Get("http://google.com")
 ...
 ```
 
-Responses will be cached in `gohttpdisk`. The cache key is the md5 sum of the HTTP method, the normalized URL, and the request body. The path will be of the form `gohttpdisk/98/fa/1f08556382802ef7e26852c527c2`. Responses never expire and are never deleted by gohttpdisk. They will last forever and grow unbounded until manually deleted.
+Responses will be cached in `gohttpdisk`. The cache key is the md5 sum of the HTTP method, the normalized URL, and the request body. The path will be of the form `gohttpdisk/google.com/98/fa/1f08556382802ef7e26852c527c2`. Responses never expire and are never deleted by gohttpdisk. They will last forever and grow unbounded until manually deleted.
 
 Note that HTTP headers are NOT used to calculate the cache key. This can be unintuitive for crawling projects that involve cookies or session state.
 

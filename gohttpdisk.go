@@ -25,11 +25,45 @@ type Options struct {
 	Dir string
 }
 
+type Status struct {
+	Digest string
+	Key    string
+	Path   string
+	Status string
+	URL    string
+}
+
 const errPrefix = "err:"
 
 // NewHTTPDisk constructs a new HTTPDisk.
 func NewHTTPDisk(options Options) *HTTPDisk {
 	return &HTTPDisk{Cache: *newCache(options)}
+}
+
+func (hd *HTTPDisk) Status(req *http.Request) (*Status, error) {
+	cacheKey, err := NewCacheKey(req)
+	if err != nil {
+		return nil, err
+	}
+
+	// what is the status?
+	data, _ := hd.Cache.Get(cacheKey)
+	var status string
+	if len(data) == 0 {
+		status = "miss"
+	} else if bytes.HasPrefix(data, []byte(errPrefix)) {
+		status = "error"
+	} else {
+		status = "hit"
+	}
+
+	return &Status{
+		Digest: cacheKey.Digest(),
+		Key:    cacheKey.Key(),
+		Path:   hd.Cache.diskpath(cacheKey),
+		Status: status,
+		URL:    req.URL.String(),
+	}, nil
 }
 
 // RoundTrip is the entry point used by http.Client.
@@ -39,8 +73,13 @@ func (hd *HTTPDisk) RoundTrip(req *http.Request) (*http.Response, error) {
 		transport = http.DefaultTransport
 	}
 
+	cacheKey, err := NewCacheKey(req)
+	if err != nil {
+		return nil, err
+	}
+
 	// get our cached response
-	resp, err := hd.get(req)
+	resp, err := hd.get(cacheKey)
 	if err != nil {
 		return nil, err
 	}
@@ -52,11 +91,11 @@ func (hd *HTTPDisk) RoundTrip(req *http.Request) (*http.Response, error) {
 	start := time.Now()
 	resp, err = transport.RoundTrip(req)
 	if err != nil {
-		return nil, hd.handleError(req, err)
+		return nil, hd.handleError(cacheKey, err)
 	}
 
 	// cache response
-	err = hd.set(req, resp, start)
+	err = hd.set(cacheKey, resp, start)
 	if err != nil {
 		return nil, err
 	}
@@ -65,8 +104,13 @@ func (hd *HTTPDisk) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 // get cached response for this request, if any
-func (hd *HTTPDisk) get(req *http.Request) (*http.Response, error) {
-	data, err := hd.Cache.Get(req)
+func (hd *HTTPDisk) get(cacheKey *CacheKey) (*http.Response, error) {
+	// cacheKey, err := NewCacheKey(req)
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	data, err := hd.Cache.Get(cacheKey)
 	if len(data) == 0 {
 		return nil, nil
 	}
@@ -81,31 +125,31 @@ func (hd *HTTPDisk) get(req *http.Request) (*http.Response, error) {
 	}
 
 	buf := bytes.NewBuffer(data)
-	return http.ReadResponse(bufio.NewReader(buf), req)
+	return http.ReadResponse(bufio.NewReader(buf), cacheKey.Request)
 }
 
 // set cached response
-func (hd *HTTPDisk) set(req *http.Request, resp *http.Response, start time.Time) error {
+func (hd *HTTPDisk) set(cacheKey *CacheKey, resp *http.Response, start time.Time) error {
 	// drain body, put back into Response
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		// errors can occur here if the server returns an invalid body. handle that
 		// case and consider caching the error
-		return hd.handleError(req, err)
+		return hd.handleError(cacheKey, err)
 	}
 	resp.Body = ioutil.NopCloser(bytes.NewBuffer(body))
 	elapsed := float64(time.Since(start)) / float64(time.Second)
 
 	// add our headers
 	resp.Header.Set("X-Gohttpdisk-Elapsed", fmt.Sprintf("%0.3f", elapsed))
-	resp.Header.Set("X-Gohttpdisk-Url", req.URL.String())
+	resp.Header.Set("X-Gohttpdisk-Url", cacheKey.Request.URL.String())
 
 	// now cache bytes
 	data, err := httputil.DumpResponse(resp, true)
 	if err != nil {
 		return err
 	}
-	err = hd.Cache.Set(req, data)
+	err = hd.Cache.Set(cacheKey, data)
 	if err != nil {
 		return err
 	}
@@ -115,9 +159,9 @@ func (hd *HTTPDisk) set(req *http.Request, resp *http.Response, start time.Time)
 	return nil
 }
 
-func (hd *HTTPDisk) handleError(req *http.Request, err error) error {
+func (hd *HTTPDisk) handleError(cacheKey *CacheKey, err error) error {
 	if isCacheableError(err) {
-		err2 := hd.setError(req, err)
+		err2 := hd.setError(cacheKey, err)
 		if err2 != nil {
 			// error while caching, give the caller a chance to see it
 			err = err2
@@ -127,9 +171,9 @@ func (hd *HTTPDisk) handleError(req *http.Request, err error) error {
 }
 
 // cache an error response
-func (hd *HTTPDisk) setError(req *http.Request, err error) error {
+func (hd *HTTPDisk) setError(cacheKey *CacheKey, err error) error {
 	body := fmt.Sprintf("%s%s", errPrefix, err.Error())
-	err2 := hd.Cache.Set(req, []byte(body))
+	err2 := hd.Cache.Set(cacheKey, []byte(body))
 	if err2 != nil {
 		return err2
 	}
