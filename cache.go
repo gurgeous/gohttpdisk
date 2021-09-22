@@ -13,23 +13,13 @@ import (
 type Cache struct {
 	// Directory where the cache is stored. Defaults to gohttpdisk.
 	Dir string
-
-	// Don't read anything from cache (but still write)
-	Force bool
-
-	// Don't read errors from cache (but still write)
-	ForceErrors bool
 }
 
 func newCache(options Options) *Cache {
 	if options.Dir == "" {
 		options.Dir = "gohttpdisk"
 	}
-	return &Cache{
-		Dir:         options.Dir,
-		Force:       options.Force,
-		ForceErrors: options.ForceErrors,
-	}
+	return &Cache{options.Dir}
 }
 
 // Get the cached data for a request. An empty byte array will be returned if

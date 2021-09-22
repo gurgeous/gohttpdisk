@@ -91,6 +91,7 @@ func TestHTTPDiskErrors(t *testing.T) {
 	hd.Cache.RemoveAll()
 	defer hd.Cache.RemoveAll()
 
+	var resp *http.Response
 	var err error
 
 	client := http.Client{Transport: hd, Timeout: time.Millisecond * 500}
@@ -106,6 +107,34 @@ func TestHTTPDiskErrors(t *testing.T) {
 	client.Get(url)
 	_, err = client.Get(url)
 	assert.Contains(t, err.Error(), "(cached)", "%s error was not cached", url)
+
+	// 40x error
+	url = "http://httpbingo.org/status/404"
+	client.Get(url)
+	resp, err = client.Get(url)
+	assert.Nil(t, err)
+	assert.Equal(t, 404, resp.StatusCode)
+	id := resp.Header.Get("fly-request-id")
+	assert.NotNil(t, id)
+
+	resp, err = client.Get(url)
+	assert.Nil(t, err)
+	assert.Equal(t, 404, resp.StatusCode)
+	assert.Equal(t, id, resp.Header.Get("fly-request-id"), "response not cached")
+
+	// 50x error
+	url = "http://httpbingo.org/status/502"
+	client.Get(url)
+	resp, err = client.Get(url)
+	assert.Nil(t, err)
+	assert.Equal(t, 502, resp.StatusCode)
+	id = resp.Header.Get("fly-request-id")
+	assert.NotNil(t, id)
+
+	resp, err = client.Get(url)
+	assert.Nil(t, err)
+	assert.Equal(t, 502, resp.StatusCode)
+	assert.Equal(t, id, resp.Header.Get("fly-request-id"), "response not cached")
 }
 
 func TestHTTPDiskForceErrors(t *testing.T) {
@@ -113,6 +142,7 @@ func TestHTTPDiskForceErrors(t *testing.T) {
 	hd.Cache.RemoveAll()
 	defer hd.Cache.RemoveAll()
 
+	var resp *http.Response
 	var err error
 
 	client := http.Client{Transport: hd, Timeout: time.Millisecond * 500}
@@ -128,6 +158,34 @@ func TestHTTPDiskForceErrors(t *testing.T) {
 	client.Get(url)
 	_, err = client.Get(url)
 	assert.NotContains(t, err.Error(), "(cached)", "%s ForceErrors not honored", url)
+
+	// 40x error
+	url = "http://httpbingo.org/status/404"
+	client.Get(url)
+	resp, err = client.Get(url)
+	assert.Nil(t, err)
+	assert.Equal(t, 404, resp.StatusCode)
+	id := resp.Header.Get("fly-request-id")
+	assert.NotNil(t, id)
+
+	resp, err = client.Get(url)
+	assert.Nil(t, err)
+	assert.Equal(t, 404, resp.StatusCode)
+	assert.NotEqual(t, id, resp.Header.Get("fly-request-id"), "response cached")
+
+	// 50x error
+	url = "http://httpbingo.org/status/502"
+	client.Get(url)
+	resp, err = client.Get(url)
+	assert.Nil(t, err)
+	assert.Equal(t, 502, resp.StatusCode)
+	id = resp.Header.Get("fly-request-id")
+	assert.NotNil(t, id)
+
+	resp, err = client.Get(url)
+	assert.Nil(t, err)
+	assert.Equal(t, 502, resp.StatusCode)
+	assert.NotEqual(t, id, resp.Header.Get("fly-request-id"), "response cached")
 }
 
 func TestHTTPDiskStatus(t *testing.T) {

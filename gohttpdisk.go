@@ -94,15 +94,22 @@ func (hd *HTTPDisk) RoundTrip(req *http.Request) (*http.Response, error) {
 	if !hd.Options.Force {
 		resp, err = hd.get(cacheKey)
 
-		// Check for cached errors
+		// Handle the following possible cases for cached data:
+		//  1. Network error: use cache if ForceErrors=false, otherwise hit network
+		//  2. HTTP 400 or 500: use cache if ForceErrors=false, otherwise hit network
+		//  3. HTTP 200 or 300: use cache
+		//  4. Nothing in cache: hit network
+
 		if err != nil {
-			// Return error unless ForceErrors is on
 			if !hd.Options.ForceErrors {
+				// Return cached network error
 				return nil, err
 			}
 		} else if resp != nil {
-			// Return valid cached response
-			return resp, nil
+			if resp.StatusCode < 400 || !hd.Options.ForceErrors {
+				// Return cached response
+				return resp, nil
+			}
 		}
 	}
 
