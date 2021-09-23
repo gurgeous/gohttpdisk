@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/http/httputil"
 	"strings"
@@ -17,12 +18,21 @@ type HTTPDisk struct {
 	Cache Cache
 	// if nil, http.DefaultTransport is used.
 	Transport http.RoundTripper
+	Options   Options
 }
 
 // Options for creating a new HTTPDisk.
 type Options struct {
 	// Directory where the cache is stored. Defaults to httpdisk.
 	Dir string
+
+	// Don't read anything from cache (but still write)
+	Force bool
+
+	// Don't read errors from cache (but still write)
+	ForceErrors bool
+
+	Logger *log.Logger
 }
 
 type Status struct {
@@ -37,7 +47,7 @@ const errPrefix = "err:"
 
 // NewHTTPDisk constructs a new HTTPDisk.
 func NewHTTPDisk(options Options) *HTTPDisk {
-	return &HTTPDisk{Cache: *newCache(options)}
+	return &HTTPDisk{Cache: *newCache(options), Options: options}
 }
 
 func (hd *HTTPDisk) Status(req *http.Request) (*Status, error) {
@@ -68,6 +78,8 @@ func (hd *HTTPDisk) Status(req *http.Request) (*Status, error) {
 
 // RoundTrip is the entry point used by http.Client.
 func (hd *HTTPDisk) RoundTrip(req *http.Request) (*http.Response, error) {
+	var resp *http.Response
+
 	transport := hd.Transport
 	if transport == nil {
 		transport = http.DefaultTransport
@@ -78,16 +90,34 @@ func (hd *HTTPDisk) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 
-	// get our cached response
-	resp, err := hd.get(cacheKey)
-	if err != nil {
-		return nil, err
-	}
-	if resp != nil {
-		return resp, nil
+	// Get our cached response unless Force is on, in which case we ignore cached data
+	if !hd.Options.Force {
+		resp, err = hd.get(cacheKey)
+
+		// Handle the following possible cases for cached data:
+		//  1. Network error: use cache if ForceErrors=false, otherwise hit network
+		//  2. HTTP 400 or 500: use cache if ForceErrors=false, otherwise hit network
+		//  3. HTTP 200 or 300: use cache
+		//  4. Nothing in cache: hit network
+
+		if err != nil {
+			if !hd.Options.ForceErrors {
+				// Return cached network error
+				return nil, err
+			}
+		} else if resp != nil {
+			if resp.StatusCode < 400 || !hd.Options.ForceErrors {
+				// Return cached response
+				return resp, nil
+			}
+		}
 	}
 
 	// not found. make the request
+	if hd.Options.Logger != nil {
+		hd.Options.Logger.Printf("%s %s", req.Method, req.URL)
+	}
+
 	start := time.Now()
 	resp, err = transport.RoundTrip(req)
 	if err != nil {
