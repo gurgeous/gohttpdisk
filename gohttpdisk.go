@@ -3,6 +3,7 @@ package gohttpdisk
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -218,6 +219,11 @@ func (hd *HTTPDisk) backgroundRevalidate(req *http.Request) {
 	if hd.Options.RevalidationWaitGroup != nil {
 		hd.Options.RevalidationWaitGroup.Add(1)
 	}
+
+	// Clone the request so that we can reissue it without being tied
+	// to the current request context. Otherwise we risk being cancelled
+	// when the main thread returns.
+	req = req.Clone(context.Background())
 
 	go func() {
 		if hd.Options.RevalidationWaitGroup != nil {
