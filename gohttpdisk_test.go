@@ -237,7 +237,7 @@ func TestHTTPDiskExpires(t *testing.T) {
 func TestHTTPDiskStaleWhileRevalidate(t *testing.T) {
 	var wg sync.WaitGroup
 
-	hd := NewHTTPDisk(Options{Dir: TmpDir(), Expires: 2 * time.Second, StaleWhileRevalidate: true, BackgroundFetchWaitGroup: &wg})
+	hd := NewHTTPDisk(Options{Dir: TmpDir(), Expires: 2 * time.Second, StaleWhileRevalidate: true, RevalidationWaitGroup: &wg})
 	hd.Cache.RemoveAll()
 	defer hd.Cache.RemoveAll()
 

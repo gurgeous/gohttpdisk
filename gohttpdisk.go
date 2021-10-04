@@ -36,16 +36,24 @@ type Options struct {
 	// Don't read errors from cache (but still write)
 	ForceErrors bool
 
+	// Optional logger
+	Logger *log.Logger
+
+	// Don't cache errors during revalidation. Leave stale data in cache instead.
+	NoCacheRevalidationErrors bool
+
+	// If StaleWhileRevalidate is enabled, you may optionally set this wait group
+	// to be notified when background fetches complete.
+	RevalidationWaitGroup *sync.WaitGroup
+
 	// Return stale cached responses while refreshing the cache in the background.
 	// Only relevant if expires is set.
 	StaleWhileRevalidate bool
 
-	// If StaleWhileRevalidate is enabled, you may optionally set this wait group
-	// to be notified when background fetches complete.
-	BackgroundFetchWaitGroup *sync.WaitGroup
-
-	// Optional logger
-	Logger *log.Logger
+	// Update cache file modification time before kicking off a background revalidation.
+	// Helps guard against thundering herd problem, but risks leaving stale data in the
+	// cache longer than expected.
+	TouchBeforeRevalidate bool
 }
 
 type Status struct {
@@ -95,30 +103,26 @@ func (hd *HTTPDisk) Status(req *http.Request) (*Status, error) {
 }
 
 // RoundTrip is the entry point used by http.Client.
-func (hd *HTTPDisk) RoundTrip(req *http.Request) (*http.Response, error) {
+func (hd *HTTPDisk) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	entry, err := hd.performRoundTrip(req)
 	if err != nil {
-		return nil, err
+		return
 	}
 
+	resp = entry.Response
+
+	// Handle stale responses
 	if hd.Options.Expires > 0 && hd.Options.Expires < entry.Age {
-		if !hd.Options.StaleWhileRevalidate {
-			return hd.fetch(req)
+		if hd.Options.StaleWhileRevalidate {
+			// Revalidate in the background while returning stale data.
+			hd.backgroundRevalidate(req)
+		} else {
+			// Must fetch and return fresh data.
+			resp, err = hd.fetch(req, true)
 		}
-
-		if hd.Options.BackgroundFetchWaitGroup != nil {
-			hd.Options.BackgroundFetchWaitGroup.Add(1)
-		}
-
-		go func() {
-			if hd.Options.BackgroundFetchWaitGroup != nil {
-				defer hd.Options.BackgroundFetchWaitGroup.Done()
-			}
-			hd.fetch(req)
-		}()
 	}
 
-	return entry.Response, nil
+	return
 }
 
 func (hd *HTTPDisk) performRoundTrip(req *http.Request) (entry *Entry, err error) {
@@ -143,7 +147,7 @@ func (hd *HTTPDisk) performRoundTrip(req *http.Request) (entry *Entry, err error
 				return nil, err
 			}
 		} else if entry != nil {
-			if entry.Response.StatusCode < 400 || !hd.Options.ForceErrors {
+			if !isHttpError(entry.Response) || !hd.Options.ForceErrors {
 				// Return cached response
 				return entry, nil
 			}
@@ -151,14 +155,14 @@ func (hd *HTTPDisk) performRoundTrip(req *http.Request) (entry *Entry, err error
 	}
 
 	// not found. make the request
-	resp, err := hd.fetch(req)
+	resp, err := hd.fetch(req, true)
 	if err != nil {
 		return nil, err
 	}
 	return &Entry{Response: resp}, nil
 }
 
-func (hd *HTTPDisk) fetch(req *http.Request) (resp *http.Response, err error) {
+func (hd *HTTPDisk) fetch(req *http.Request, cacheErrors bool) (resp *http.Response, err error) {
 	transport := hd.Transport
 	if transport == nil {
 		transport = http.DefaultTransport
@@ -177,16 +181,42 @@ func (hd *HTTPDisk) fetch(req *http.Request) (resp *http.Response, err error) {
 	start := time.Now()
 	resp, err = transport.RoundTrip(req)
 	if err != nil {
-		return nil, hd.handleError(cacheKey, err)
+		if cacheErrors {
+			err = hd.handleError(cacheKey, err)
+		}
+		return nil, err
 	}
 
 	// cache response
-	err = hd.set(cacheKey, resp, start)
+	err = hd.set(cacheKey, resp, start, cacheErrors)
 	if err != nil {
 		return nil, err
 	}
 
 	return resp, nil
+}
+
+// Launch goroutine to refresh the cache
+func (hd *HTTPDisk) backgroundRevalidate(req *http.Request) {
+	// Update timestamp on old file before proceeding. Protection against
+	// thundering herd.
+	if hd.Options.TouchBeforeRevalidate {
+		cacheKey, err := NewCacheKey(req)
+		if err == nil {
+			hd.Cache.Touch(cacheKey)
+		}
+	}
+
+	if hd.Options.RevalidationWaitGroup != nil {
+		hd.Options.RevalidationWaitGroup.Add(1)
+	}
+
+	go func() {
+		if hd.Options.RevalidationWaitGroup != nil {
+			defer hd.Options.RevalidationWaitGroup.Done()
+		}
+		hd.fetch(req, !hd.Options.NoCacheRevalidationErrors)
+	}()
 }
 
 // get cached response for this request, if any
@@ -214,18 +244,26 @@ func (hd *HTTPDisk) get(cacheKey *CacheKey) (*Entry, error) {
 }
 
 // set cached response
-func (hd *HTTPDisk) set(cacheKey *CacheKey, resp *http.Response, start time.Time) error {
+func (hd *HTTPDisk) set(cacheKey *CacheKey, resp *http.Response, start time.Time, cacheErrors bool) error {
 	// drain body, put back into Response
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		// errors can occur here if the server returns an invalid body. handle that
 		// case and consider caching the error
-		return hd.handleError(cacheKey, err)
+		if cacheErrors {
+			err = hd.handleError(cacheKey, err)
+		}
+		return err
 	}
 	resp.Body = ioutil.NopCloser(bytes.NewBuffer(body))
-	elapsed := float64(time.Since(start)) / float64(time.Second)
+
+	// short circuit for http errors
+	if !cacheErrors && isHttpError(resp) {
+		return nil
+	}
 
 	// add our headers
+	elapsed := float64(time.Since(start)) / float64(time.Second)
 	resp.Header.Set("X-Gohttpdisk-Elapsed", fmt.Sprintf("%0.3f", elapsed))
 	resp.Header.Set("X-Gohttpdisk-Url", cacheKey.Request.URL.String())
 
@@ -296,4 +334,8 @@ func isCacheableError(err error) bool {
 
 	fmt.Printf("isCacheableError? type:%T v:%v\n", err, err)
 	return false
+}
+
+func isHttpError(resp *http.Response) bool {
+	return resp.StatusCode >= 400
 }

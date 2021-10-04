@@ -82,6 +82,19 @@ func (cache *Cache) Set(cacheKey *CacheKey, data []byte) error {
 	return nil
 }
 
+// Update the modified time if the cached file exists.
+func (cache *Cache) Touch(cacheKey *CacheKey) error {
+	path := cache.diskpath(cacheKey)
+	_, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		// Do nothing if the file doesn't exist
+		return nil
+	}
+
+	currentTime := time.Now()
+	return os.Chtimes(path, currentTime, currentTime)
+}
+
 // RemoveAll unlinks the cache.
 func (cache *Cache) RemoveAll() error {
 	return os.RemoveAll(cache.Dir)
