@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gurgeous/gohttpdisk"
 	"github.com/spf13/pflag"
@@ -55,6 +56,10 @@ func main() {
 		fmt.Printf("key: %q\n", status.Key)
 		fmt.Printf("digest: %q\n", status.Digest)
 		fmt.Printf("path: %q\n", status.Path)
+		if status.Age > 0 {
+			fmt.Printf("age: %q\n", status.Age.Truncate(time.Second))
+		}
+
 	}
 }
 

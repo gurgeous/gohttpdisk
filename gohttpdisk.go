@@ -58,6 +58,7 @@ type Options struct {
 }
 
 type Status struct {
+	Age    time.Duration
 	Digest string
 	Key    string
 	Path   string
@@ -84,7 +85,7 @@ func (hd *HTTPDisk) Status(req *http.Request) (*Status, error) {
 	}
 
 	// what is the status?
-	data, _, _ := hd.Cache.Get(cacheKey)
+	data, age, _ := hd.Cache.Get(cacheKey)
 	var status string
 	if len(data) == 0 {
 		status = "miss"
@@ -95,6 +96,7 @@ func (hd *HTTPDisk) Status(req *http.Request) (*Status, error) {
 	}
 
 	return &Status{
+		Age:    age,
 		Digest: cacheKey.Digest(),
 		Key:    cacheKey.Key(),
 		Path:   hd.Cache.diskpath(cacheKey),
