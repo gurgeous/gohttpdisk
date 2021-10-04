@@ -181,10 +181,18 @@ func (hd *HTTPDisk) fetch(req *http.Request, cacheErrors bool) (resp *http.Respo
 	start := time.Now()
 	resp, err = transport.RoundTrip(req)
 	if err != nil {
+		if hd.Options.Logger != nil {
+			hd.Options.Logger.Printf("Network error on %s (%s)", req.URL, err)
+		}
+
 		if cacheErrors {
 			err = hd.handleError(cacheKey, err)
 		}
 		return nil, err
+	}
+
+	if hd.Options.Logger != nil && isHttpError(resp) {
+		hd.Options.Logger.Printf("Http error on %s (%s)", req.URL, resp.Status)
 	}
 
 	// cache response
