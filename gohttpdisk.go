@@ -66,7 +66,7 @@ type Status struct {
 	URL    string
 }
 
-type Entry struct {
+type CacheEntry struct {
 	Response *http.Response
 	Age      time.Duration
 }
@@ -105,66 +105,55 @@ func (hd *HTTPDisk) Status(req *http.Request) (*Status, error) {
 	}, nil
 }
 
-// RoundTrip is the entry point used by http.Client.
 func (hd *HTTPDisk) RoundTrip(req *http.Request) (resp *http.Response, err error) {
-	entry, err := hd.performRoundTrip(req)
-	if err != nil {
-		return
-	}
-
-	resp = entry.Response
-
-	// Handle stale responses
-	if hd.Options.Expires > 0 && hd.Options.Expires < entry.Age {
-		if hd.Options.StaleWhileRevalidate {
-			// Revalidate in the background while returning stale data.
-			hd.backgroundRevalidate(req)
-		} else {
-			// Must fetch and return fresh data.
-			resp, err = hd.fetch(req, true)
-		}
-	}
-
-	return
-}
-
-func (hd *HTTPDisk) performRoundTrip(req *http.Request) (entry *Entry, err error) {
 	cacheKey, err := NewCacheKey(req)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get our cached response unless Force is on, in which case we ignore cached data
-	if !hd.Options.Force {
-		entry, err = hd.get(cacheKey)
+	//
+	// Try to read response from cache
+	//
 
-		// Handle the following possible cases for cached data:
-		//  1. Network error: use cache if ForceErrors=false, otherwise hit network
-		//  2. HTTP 400 or 500: use cache if ForceErrors=false, otherwise hit network
-		//  3. HTTP 200 or 300: use cache
-		//  4. Nothing in cache: hit network
-
-		if err != nil {
-			if !hd.Options.ForceErrors {
-				// Return cached network error
-				return nil, err
-			}
-		} else if entry != nil {
-			if !isHttpError(entry.Response) || !hd.Options.ForceErrors {
-				// Return cached response
-				return entry, nil
-			}
-		}
-	}
-
-	// not found. make the request
-	resp, err := hd.fetch(req, true)
+	entry, err := hd.get(cacheKey)
 	if err != nil {
 		return nil, err
 	}
-	return &Entry{Response: resp}, nil
+
+	if entry != nil {
+		resp = entry.Response
+	}
+
+	//
+	// Handle stale responses
+	//
+
+	if hd.isStale(entry) {
+		if hd.Options.StaleWhileRevalidate {
+			// Revalidate in the background while returning stale data.
+			hd.backgroundRevalidate(req)
+		} else {
+			// Must fetch and return fresh data. Drop the stale data.
+			resp = nil
+		}
+	}
+
+	//
+	// Make network request if necessary
+	//
+
+	if resp == nil {
+		// not found. make the request.
+		resp, err = hd.fetch(req, true)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return resp, nil
 }
 
+// Fetch a response over the network
 func (hd *HTTPDisk) fetch(req *http.Request, cacheErrors bool) (resp *http.Response, err error) {
 	transport := hd.Transport
 	if transport == nil {
@@ -235,8 +224,35 @@ func (hd *HTTPDisk) backgroundRevalidate(req *http.Request) {
 	}()
 }
 
+// Get cached response for this request. Honors Force and ForceErrors
+// but may return stale data.
+func (hd *HTTPDisk) get(cacheKey *CacheKey) (*CacheEntry, error) {
+	if hd.Options.Force {
+		// Ignore cached data if Force is on
+		return nil, nil
+	}
+
+	entry, err := hd.readFromCache(cacheKey)
+
+	//
+	// If ForceErrors is on, drop all cached errors
+	//
+
+	if hd.Options.ForceErrors {
+		// Drop cached network errors
+		err = nil
+
+		// Drop cached http errors
+		if entry != nil && isHttpError(entry.Response) {
+			entry = nil
+		}
+	}
+
+	return entry, err
+}
+
 // get cached response for this request, if any
-func (hd *HTTPDisk) get(cacheKey *CacheKey) (*Entry, error) {
+func (hd *HTTPDisk) readFromCache(cacheKey *CacheKey) (*CacheEntry, error) {
 	data, age, err := hd.Cache.Get(cacheKey)
 	if len(data) == 0 {
 		return nil, nil
@@ -256,7 +272,7 @@ func (hd *HTTPDisk) get(cacheKey *CacheKey) (*Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Entry{Response: resp, Age: age}, nil
+	return &CacheEntry{Response: resp, Age: age}, nil
 }
 
 // set cached response
@@ -317,6 +333,10 @@ func (hd *HTTPDisk) setError(cacheKey *CacheKey, err error) error {
 		return err2
 	}
 	return nil
+}
+
+func (hd *HTTPDisk) isStale(entry *CacheEntry) bool {
+	return entry != nil && hd.Options.Expires > 0 && hd.Options.Expires < entry.Age
 }
 
 // if err.Error() contains one of these, we consider the error to be cacheable
