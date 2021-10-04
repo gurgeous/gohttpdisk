@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -26,12 +27,24 @@ type Options struct {
 	// Directory where the cache is stored. Defaults to httpdisk.
 	Dir string
 
+	// When to expire cached requests. Less than or equal to zero disables.
+	Expires time.Duration
+
 	// Don't read anything from cache (but still write)
 	Force bool
 
 	// Don't read errors from cache (but still write)
 	ForceErrors bool
 
+	// Return stale cached responses while refreshing the cache in the background.
+	// Only relevant if expires is set.
+	StaleWhileRevalidate bool
+
+	// If StaleWhileRevalidate is enabled, you may optionally set this wait group
+	// to be notified when background fetches complete.
+	BackgroundFetchWaitGroup *sync.WaitGroup
+
+	// Optional logger
 	Logger *log.Logger
 }
 
@@ -41,6 +54,11 @@ type Status struct {
 	Path   string
 	Status string
 	URL    string
+}
+
+type Entry struct {
+	Response *http.Response
+	Age      time.Duration
 }
 
 const errPrefix = "err:"
@@ -57,7 +75,7 @@ func (hd *HTTPDisk) Status(req *http.Request) (*Status, error) {
 	}
 
 	// what is the status?
-	data, _ := hd.Cache.Get(cacheKey)
+	data, _, _ := hd.Cache.Get(cacheKey)
 	var status string
 	if len(data) == 0 {
 		status = "miss"
@@ -78,13 +96,32 @@ func (hd *HTTPDisk) Status(req *http.Request) (*Status, error) {
 
 // RoundTrip is the entry point used by http.Client.
 func (hd *HTTPDisk) RoundTrip(req *http.Request) (*http.Response, error) {
-	var resp *http.Response
-
-	transport := hd.Transport
-	if transport == nil {
-		transport = http.DefaultTransport
+	entry, err := hd.performRoundTrip(req)
+	if err != nil {
+		return nil, err
 	}
 
+	if hd.Options.Expires > 0 && hd.Options.Expires < entry.Age {
+		if !hd.Options.StaleWhileRevalidate {
+			return hd.fetch(req)
+		}
+
+		if hd.Options.BackgroundFetchWaitGroup != nil {
+			hd.Options.BackgroundFetchWaitGroup.Add(1)
+		}
+
+		go func() {
+			if hd.Options.BackgroundFetchWaitGroup != nil {
+				defer hd.Options.BackgroundFetchWaitGroup.Done()
+			}
+			hd.fetch(req)
+		}()
+	}
+
+	return entry.Response, nil
+}
+
+func (hd *HTTPDisk) performRoundTrip(req *http.Request) (entry *Entry, err error) {
 	cacheKey, err := NewCacheKey(req)
 	if err != nil {
 		return nil, err
@@ -92,7 +129,7 @@ func (hd *HTTPDisk) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	// Get our cached response unless Force is on, in which case we ignore cached data
 	if !hd.Options.Force {
-		resp, err = hd.get(cacheKey)
+		entry, err = hd.get(cacheKey)
 
 		// Handle the following possible cases for cached data:
 		//  1. Network error: use cache if ForceErrors=false, otherwise hit network
@@ -105,12 +142,31 @@ func (hd *HTTPDisk) RoundTrip(req *http.Request) (*http.Response, error) {
 				// Return cached network error
 				return nil, err
 			}
-		} else if resp != nil {
-			if resp.StatusCode < 400 || !hd.Options.ForceErrors {
+		} else if entry != nil {
+			if entry.Response.StatusCode < 400 || !hd.Options.ForceErrors {
 				// Return cached response
-				return resp, nil
+				return entry, nil
 			}
 		}
+	}
+
+	// not found. make the request
+	resp, err := hd.fetch(req)
+	if err != nil {
+		return nil, err
+	}
+	return &Entry{Response: resp}, nil
+}
+
+func (hd *HTTPDisk) fetch(req *http.Request) (resp *http.Response, err error) {
+	transport := hd.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+
+	cacheKey, err := NewCacheKey(req)
+	if err != nil {
+		return nil, err
 	}
 
 	// not found. make the request
@@ -134,13 +190,8 @@ func (hd *HTTPDisk) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 // get cached response for this request, if any
-func (hd *HTTPDisk) get(cacheKey *CacheKey) (*http.Response, error) {
-	// cacheKey, err := NewCacheKey(req)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	data, err := hd.Cache.Get(cacheKey)
+func (hd *HTTPDisk) get(cacheKey *CacheKey) (*Entry, error) {
+	data, age, err := hd.Cache.Get(cacheKey)
 	if len(data) == 0 {
 		return nil, nil
 	}
@@ -155,7 +206,11 @@ func (hd *HTTPDisk) get(cacheKey *CacheKey) (*http.Response, error) {
 	}
 
 	buf := bytes.NewBuffer(data)
-	return http.ReadResponse(bufio.NewReader(buf), cacheKey.Request)
+	resp, err := http.ReadResponse(bufio.NewReader(buf), cacheKey.Request)
+	if err != nil {
+		return nil, err
+	}
+	return &Entry{Response: resp, Age: age}, nil
 }
 
 // set cached response

@@ -3,6 +3,7 @@ package gohttpdisk
 import (
 	"io/ioutil"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -186,6 +187,112 @@ func TestHTTPDiskForceErrors(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, 502, resp.StatusCode)
 	assert.NotEqual(t, id, resp.Header.Get("fly-request-id"), "response cached")
+}
+
+func TestHTTPDiskExpires(t *testing.T) {
+	hd := NewHTTPDisk(Options{Dir: TmpDir(), Expires: 2 * time.Second})
+	hd.Cache.RemoveAll()
+	defer hd.Cache.RemoveAll()
+
+	client := http.Client{Transport: hd}
+
+	//
+	// 1. miss
+	//
+
+	url := "http://httpbingo.org/get"
+	resp, err := client.Get(url)
+	if err != nil {
+		t.Fatalf("Get %s failed %s", url, err)
+	}
+	defer resp.Body.Close()
+	id1 := resp.Header.Get("fly-request-id")
+	assert.NotNil(t, id1)
+
+	//
+	// 2. hit
+	//
+
+	resp, err = client.Get(url)
+	if err != nil {
+		t.Fatalf("Get %s failed %s", url, err)
+	}
+	defer resp.Body.Close()
+	assert.Equal(t, id1, resp.Header.Get("fly-request-id"))
+
+	//
+	// 3. expired
+	//
+
+	time.Sleep(3 * time.Second)
+
+	resp, err = client.Get(url)
+	if err != nil {
+		t.Fatalf("Get %s failed %s", url, err)
+	}
+	defer resp.Body.Close()
+	assert.NotEqual(t, id1, resp.Header.Get("fly-request-id"))
+}
+
+func TestHTTPDiskStaleWhileRevalidate(t *testing.T) {
+	var wg sync.WaitGroup
+
+	hd := NewHTTPDisk(Options{Dir: TmpDir(), Expires: 2 * time.Second, StaleWhileRevalidate: true, BackgroundFetchWaitGroup: &wg})
+	hd.Cache.RemoveAll()
+	defer hd.Cache.RemoveAll()
+
+	client := http.Client{Transport: hd}
+
+	//
+	// 1. miss
+	//
+
+	url := "http://httpbingo.org/get"
+	resp, err := client.Get(url)
+	if err != nil {
+		t.Fatalf("Get %s failed %s", url, err)
+	}
+	defer resp.Body.Close()
+	id1 := resp.Header.Get("fly-request-id")
+	assert.NotNil(t, id1)
+
+	//
+	// 2. hit
+	//
+
+	resp, err = client.Get(url)
+	if err != nil {
+		t.Fatalf("Get %s failed %s", url, err)
+	}
+	defer resp.Body.Close()
+	assert.Equal(t, id1, resp.Header.Get("fly-request-id"))
+
+	//
+	// 3. stale
+	//
+
+	time.Sleep(3 * time.Second)
+
+	resp, err = client.Get(url)
+	if err != nil {
+		t.Fatalf("Get %s failed %s", url, err)
+	}
+	defer resp.Body.Close()
+	assert.Equal(t, id1, resp.Header.Get("fly-request-id"))
+
+	//
+	// 4. refreshed in background
+	//
+
+	// Wait for background fetch to complete
+	wg.Wait()
+
+	resp, err = client.Get(url)
+	if err != nil {
+		t.Fatalf("Get %s failed %s", url, err)
+	}
+	defer resp.Body.Close()
+	assert.NotEqual(t, id1, resp.Header.Get("fly-request-id"))
 }
 
 func TestHTTPDiskStatus(t *testing.T) {
