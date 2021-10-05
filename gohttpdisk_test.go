@@ -293,6 +293,7 @@ func TestHTTPDiskStaleWhileRevalidate(t *testing.T) {
 		t.Fatalf("Get %s failed %s", url, err)
 	}
 	defer resp.Body.Close()
+	assert.Equal(t, 200, resp.StatusCode)
 	assert.Equal(t, "1", resp.Header.Get("X-Request-Id"))
 
 	//
@@ -303,6 +304,7 @@ func TestHTTPDiskStaleWhileRevalidate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get %s failed %s", url, err)
 	}
+	assert.Equal(t, 200, resp.StatusCode)
 	assert.Equal(t, "1", resp.Header.Get("X-Request-Id"))
 
 	//
@@ -316,6 +318,7 @@ func TestHTTPDiskStaleWhileRevalidate(t *testing.T) {
 		t.Fatalf("Get %s failed %s", url, err)
 	}
 	defer resp.Body.Close()
+	assert.Equal(t, 200, resp.StatusCode)
 	assert.Equal(t, "1", resp.Header.Get("X-Request-Id"))
 
 	//
@@ -330,7 +333,205 @@ func TestHTTPDiskStaleWhileRevalidate(t *testing.T) {
 		t.Fatalf("Get %s failed %s", url, err)
 	}
 	defer resp.Body.Close()
+	assert.Equal(t, 200, resp.StatusCode)
 	assert.Equal(t, "2", resp.Header.Get("X-Request-Id"))
+
+	//
+	// 5. stale again
+	//
+
+	time.Sleep(150 * time.Millisecond)
+
+	resp, err = client.Get(url)
+	if err != nil {
+		t.Fatalf("Get %s failed %s", url, err)
+	}
+	defer resp.Body.Close()
+	assert.Equal(t, 200, resp.StatusCode)
+	assert.Equal(t, "2", resp.Header.Get("X-Request-Id"))
+
+	//
+	// 4. refreshed in background
+	//
+
+	// Wait for background fetch to complete. This request returns a 502 error.
+	wg.Wait()
+
+	resp, err = client.Get(url)
+	if err != nil {
+		t.Fatalf("Get %s failed %s", url, err)
+	}
+	defer resp.Body.Close()
+	assert.Equal(t, 502, resp.StatusCode)
+	assert.Equal(t, "3", resp.Header.Get("X-Request-Id"))
+}
+
+func TestHTTPDiskNoCacheRevalidationErrors(t *testing.T) {
+	var wg sync.WaitGroup
+
+	client := setupClient(t, Options{
+		Expires:                   100 * time.Millisecond,
+		StaleWhileRevalidate:      true,
+		NoCacheRevalidationErrors: true,
+		RevalidationWaitGroup:     &wg,
+	})
+	defer teardownClient(client)
+
+	//
+	// 1. miss
+	//
+
+	url := "http://httpbingo.org/get"
+	resp, err := client.Get(url)
+	if err != nil {
+		t.Fatalf("Get %s failed %s", url, err)
+	}
+	defer resp.Body.Close()
+	assert.Equal(t, 200, resp.StatusCode)
+	assert.Equal(t, "1", resp.Header.Get("X-Request-Id"))
+
+	//
+	// 2. stale
+	//
+
+	time.Sleep(150 * time.Millisecond)
+
+	resp, err = client.Get(url)
+	if err != nil {
+		t.Fatalf("Get %s failed %s", url, err)
+	}
+	defer resp.Body.Close()
+	assert.Equal(t, 200, resp.StatusCode)
+	assert.Equal(t, "1", resp.Header.Get("X-Request-Id"))
+
+	//
+	// 3. got error in background, dropped
+	//
+
+	// Wait for background fetch to complete
+	wg.Wait()
+
+	resp, err = client.Get(url)
+	if err != nil {
+		t.Fatalf("Get %s failed %s", url, err)
+	}
+	defer resp.Body.Close()
+	assert.Equal(t, 200, resp.StatusCode)
+	assert.Equal(t, "1", resp.Header.Get("X-Request-Id"))
+
+	//
+	// 4. refreshed in background, success
+	//
+
+	// Wait for background fetch to complete
+	wg.Wait()
+
+	resp, err = client.Get(url)
+	if err != nil {
+		t.Fatalf("Get %s failed %s", url, err)
+	}
+	defer resp.Body.Close()
+	assert.Equal(t, 200, resp.StatusCode)
+	assert.Equal(t, "3", resp.Header.Get("X-Request-Id"))
+}
+
+func TestHTTPDiskTouchBeforeRevalidate(t *testing.T) {
+	var wg sync.WaitGroup
+
+	client := setupClient(t, Options{
+		Expires:                   100 * time.Millisecond,
+		StaleWhileRevalidate:      true,
+		NoCacheRevalidationErrors: true,
+		TouchBeforeRevalidate:     true,
+		RevalidationWaitGroup:     &wg,
+	})
+	defer teardownClient(client)
+
+	//
+	// 1. miss
+	//
+
+	url := "http://httpbingo.org/get"
+	resp, err := client.Get(url)
+	if err != nil {
+		t.Fatalf("Get %s failed %s", url, err)
+	}
+	defer resp.Body.Close()
+	assert.Equal(t, 200, resp.StatusCode)
+	assert.Equal(t, "1", resp.Header.Get("X-Request-Id"))
+
+	//
+	// 2. stale
+	//
+
+	time.Sleep(150 * time.Millisecond)
+
+	resp, err = client.Get(url)
+	if err != nil {
+		t.Fatalf("Get %s failed %s", url, err)
+	}
+	defer resp.Body.Close()
+	assert.Equal(t, 200, resp.StatusCode)
+	assert.Equal(t, "1", resp.Header.Get("X-Request-Id"))
+
+	//
+	// 3. got error in background, dropped
+	//
+
+	// Wait for background fetch to complete
+	wg.Wait()
+
+	resp, err = client.Get(url)
+	if err != nil {
+		t.Fatalf("Get %s failed %s", url, err)
+	}
+	defer resp.Body.Close()
+	assert.Equal(t, 200, resp.StatusCode)
+	assert.Equal(t, "1", resp.Header.Get("X-Request-Id"))
+
+	//
+	// 4. Not considered stale anymore, so still serving original response
+	//
+
+	// This should be a noop
+	wg.Wait()
+
+	resp, err = client.Get(url)
+	if err != nil {
+		t.Fatalf("Get %s failed %s", url, err)
+	}
+	defer resp.Body.Close()
+	assert.Equal(t, 200, resp.StatusCode)
+	assert.Equal(t, "1", resp.Header.Get("X-Request-Id"))
+
+	//
+	// 5. stale again
+	//
+
+	time.Sleep(150 * time.Millisecond)
+
+	resp, err = client.Get(url)
+	if err != nil {
+		t.Fatalf("Get %s failed %s", url, err)
+	}
+	defer resp.Body.Close()
+	assert.Equal(t, 200, resp.StatusCode)
+	assert.Equal(t, "1", resp.Header.Get("X-Request-Id"))
+
+	//
+	// 5. refreshed in background, success
+	//
+
+	// Wait for background fetch to complete
+	wg.Wait()
+
+	resp, err = client.Get(url)
+	if err != nil {
+		t.Fatalf("Get %s failed %s", url, err)
+	}
+	defer resp.Body.Close()
+	assert.Equal(t, 200, resp.StatusCode)
+	assert.Equal(t, "3", resp.Header.Get("X-Request-Id"))
 }
 
 func TestHTTPDiskStatus(t *testing.T) {
@@ -357,22 +558,6 @@ func TestHTTPDiskStatus(t *testing.T) {
 //
 // Helpers
 //
-
-// Create a new recorder for the current test.
-// Fixtures must be stored in fixtures/<testName>.yaml
-//
-// Callers are responsible for stopping the returned vcr. For example:
-//   vcr := newVCR(t)
-//   defer vcr.Stop()
-func newVCR(t *testing.T) *recorder.Recorder {
-	cassette := fmt.Sprintf("fixtures/%s", t.Name())
-	vcr, err := recorder.New(cassette)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return vcr
-}
 
 // Create and configure an http client for testing using httpdisk and recorder
 // for the current test.
@@ -404,6 +589,22 @@ func teardownClient(client *http.Client) {
 
 	vcr := hd.Transport.(*recorder.Recorder)
 	vcr.Stop()
+}
+
+// Create a new recorder for the current test.
+// Fixtures must be stored in fixtures/<testName>.yaml
+//
+// Callers are responsible for stopping the returned vcr. For example:
+//   vcr := newVCR(t)
+//   defer vcr.Stop()
+func newVCR(t *testing.T) *recorder.Recorder {
+	cassette := fmt.Sprintf("fixtures/%s", t.Name())
+	vcr, err := recorder.New(cassette)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return vcr
 }
 
 //

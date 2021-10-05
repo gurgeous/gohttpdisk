@@ -26,8 +26,8 @@ interactions:
       headers:
         X-Request-Id:
           - "2"
-      status: 200 OK
-      code: 200
+      status: 502 Bad Gateway
+      code: 502
       duration: ""
   - request:
       body: ""
@@ -40,6 +40,6 @@ interactions:
       headers:
         X-Request-Id:
           - "3"
-      status: 502 Bad Gateway
-      code: 502
+      status: 200 OK
+      code: 200
       duration: ""
