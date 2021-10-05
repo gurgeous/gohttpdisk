@@ -28,8 +28,10 @@ type Options struct {
 	// Directory where the cache is stored. Defaults to httpdisk.
 	Dir string
 
-	// When to expire cached requests. Less than or equal to zero disables.
-	Expires time.Duration
+	// Maximum amount of time a cached response is considered fresh. If less
+	// than or equal to zero, then all content is considred fresh. If positive,
+	// then cached content will be re-fetched if it is older than this.
+	MaxAge time.Duration
 
 	// Don't read anything from cache (but still write)
 	Force bool
@@ -48,7 +50,7 @@ type Options struct {
 	RevalidationWaitGroup *sync.WaitGroup
 
 	// Return stale cached responses while refreshing the cache in the background.
-	// Only relevant if expires is set.
+	// Only relevant if MaxAge is set.
 	StaleWhileRevalidate bool
 
 	// Update cache file modification time before kicking off a background revalidation.
@@ -336,7 +338,7 @@ func (hd *HTTPDisk) setError(cacheKey *CacheKey, err error) error {
 }
 
 func (hd *HTTPDisk) isStale(entry *CacheEntry) bool {
-	return entry != nil && hd.Options.Expires > 0 && hd.Options.Expires < entry.Age
+	return entry != nil && hd.Options.MaxAge > 0 && entry.Age > hd.Options.MaxAge
 }
 
 // if err.Error() contains one of these, we consider the error to be cacheable

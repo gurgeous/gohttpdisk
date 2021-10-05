@@ -236,8 +236,8 @@ func TestHTTPDiskForceNoSuchHost(t *testing.T) {
 	}
 }
 
-func TestHTTPDiskExpires(t *testing.T) {
-	client := setupClient(t, Options{Expires: 100 * time.Millisecond})
+func TestHTTPDiskMaxAge(t *testing.T) {
+	client := setupClient(t, Options{MaxAge: 100 * time.Millisecond})
 	defer teardownClient(client)
 
 	//
@@ -264,7 +264,7 @@ func TestHTTPDiskExpires(t *testing.T) {
 	assert.Equal(t, "1", resp.Header.Get("X-Request-Id"))
 
 	//
-	// 3. expired
+	// 3. stale, re-fetch
 	//
 
 	time.Sleep(150 * time.Millisecond)
@@ -280,7 +280,7 @@ func TestHTTPDiskExpires(t *testing.T) {
 func TestHTTPDiskStaleWhileRevalidate(t *testing.T) {
 	var wg sync.WaitGroup
 
-	client := setupClient(t, Options{Expires: 100 * time.Millisecond, StaleWhileRevalidate: true, RevalidationWaitGroup: &wg})
+	client := setupClient(t, Options{MaxAge: 100 * time.Millisecond, StaleWhileRevalidate: true, RevalidationWaitGroup: &wg})
 	defer teardownClient(client)
 
 	//
@@ -370,7 +370,7 @@ func TestHTTPDiskNoCacheRevalidationErrors(t *testing.T) {
 	var wg sync.WaitGroup
 
 	client := setupClient(t, Options{
-		Expires:                   100 * time.Millisecond,
+		MaxAge:                    100 * time.Millisecond,
 		StaleWhileRevalidate:      true,
 		NoCacheRevalidationErrors: true,
 		RevalidationWaitGroup:     &wg,
@@ -439,7 +439,7 @@ func TestHTTPDiskTouchBeforeRevalidate(t *testing.T) {
 	var wg sync.WaitGroup
 
 	client := setupClient(t, Options{
-		Expires:                   100 * time.Millisecond,
+		MaxAge:                    100 * time.Millisecond,
 		StaleWhileRevalidate:      true,
 		NoCacheRevalidationErrors: true,
 		TouchBeforeRevalidate:     true,
