@@ -200,8 +200,8 @@ func (hd *HTTPDisk) fetch(req *http.Request, cacheErrors bool) (resp *http.Respo
 
 // Launch goroutine to refresh the cache
 func (hd *HTTPDisk) backgroundRevalidate(req *http.Request) {
-	// Update timestamp on old file before proceeding. Protection against
-	// thundering herd.
+	// If configured, update timestamp on old file before proceeding. Protection
+	// against thundering herd.
 	if hd.Options.TouchBeforeRevalidate {
 		cacheKey, err := NewCacheKey(req)
 		if err == nil {
@@ -218,6 +218,7 @@ func (hd *HTTPDisk) backgroundRevalidate(req *http.Request) {
 	// when the main thread returns.
 	req = req.Clone(context.Background())
 
+	// Perform fetch in goroutine
 	go func() {
 		if hd.Options.RevalidationWaitGroup != nil {
 			defer hd.Options.RevalidationWaitGroup.Done()
@@ -291,7 +292,7 @@ func (hd *HTTPDisk) set(cacheKey *CacheKey, resp *http.Response, start time.Time
 	}
 	resp.Body = ioutil.NopCloser(bytes.NewBuffer(body))
 
-	// short circuit for http errors
+	// short circuit for http errors if cacheErrors=false
 	if !cacheErrors && isHttpError(resp) {
 		return nil
 	}
