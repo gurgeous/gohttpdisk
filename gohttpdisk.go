@@ -29,7 +29,7 @@ type Options struct {
 	Dir string
 
 	// Maximum amount of time a cached response is considered fresh. If less
-	// than or equal to zero, then all content is considred fresh. If positive,
+	// than or equal to zero, then all content is considered fresh. If positive,
 	// then cached content will be re-fetched if it is older than this.
 	MaxAge time.Duration
 
