@@ -42,7 +42,8 @@ type Options struct {
 	// Optional logger
 	Logger *log.Logger
 
-	// Don't cache errors during revalidation. Leave stale data in cache instead.
+	// Don't cache errors during background revalidation. Leave stale data in cache instead.
+	// Only relevant if StaleWhileRevalidate is set.
 	NoCacheRevalidationErrors bool
 
 	// If StaleWhileRevalidate is enabled, you may optionally set this wait group
@@ -55,7 +56,7 @@ type Options struct {
 
 	// Update cache file modification time before kicking off a background revalidation.
 	// Helps guard against thundering herd problem, but risks leaving stale data in the
-	// cache longer than expected.
+	// cache longer than expected. Only relevant if StaleWhileRevalidate is set.
 	TouchBeforeRevalidate bool
 }
 
