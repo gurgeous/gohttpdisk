@@ -79,11 +79,13 @@ func (cacheKey *CacheKey) Digest() string {
 }
 
 // Path returns the path on disk for this request.
-func (cacheKey *CacheKey) Diskpath() string {
+func (cacheKey *CacheKey) Diskpath(noHosts bool) string {
 	paths := []string{}
 
-	// Dir
-	paths = append(paths, normalizeHostForPath(cacheKey.Request.URL.Hostname()))
+	if !noHosts {
+		// Host dir
+		paths = append(paths, normalizeHostForPath(cacheKey.Request.URL.Hostname()))
+	}
 
 	// Key
 	key := cacheKey.Digest()

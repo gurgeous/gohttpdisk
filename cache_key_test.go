@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -41,14 +42,22 @@ func TestCacheKeys(t *testing.T) {
 }
 
 func TestCacheHost(t *testing.T) {
-	hostDir := fmt.Sprintf("a.com%c", os.PathSeparator)
+	sep := regexp.QuoteMeta(fmt.Sprintf("%c", os.PathSeparator))
+	hostPathRE := regexp.MustCompile(fmt.Sprintf("^a\\.com%s[a-f0-9]{2}%s[a-f0-9]{2}%s[a-f0-9]+$", sep, sep, sep))
+	noHostPathRE := regexp.MustCompile(fmt.Sprintf("^[a-f0-9]{2}%s[a-f0-9]{2}%s[a-f0-9]+$", sep, sep))
 
 	urls := []string{"http://a.com", "http://www.a~~.com"}
 	for _, url := range urls {
 		ck := MustCacheKey(MustRequest("GET", url))
-		path := ck.Diskpath()
-		if !strings.HasPrefix(path, hostDir) {
-			t.Fatalf("path %s for url %s should start with %s", path, url, hostDir)
-		}
+
+		// With host
+		noHosts := false
+		path := ck.Diskpath(noHosts)
+		assert.Regexp(t, hostPathRE, path)
+
+		// Without host
+		noHosts = true
+		path = ck.Diskpath(noHosts)
+		assert.Regexp(t, noHostPathRE, path)
 	}
 }

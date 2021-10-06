@@ -19,9 +19,10 @@ import (
 //
 
 type Args struct {
-	dir    string
-	status bool
-	u      *url.URL
+	dir     string
+	nohosts bool
+	status  bool
+	u       *url.URL
 }
 
 func main() {
@@ -41,7 +42,7 @@ func main() {
 	}
 
 	// go!
-	hd := gohttpdisk.NewHTTPDisk(gohttpdisk.Options{Dir: args.dir})
+	hd := gohttpdisk.NewHTTPDisk(gohttpdisk.Options{Dir: args.dir, NoHosts: args.nohosts})
 
 	// status
 	if args.status {
@@ -89,6 +90,7 @@ func cli() (*Args, error) {
 	cli := pflag.NewFlagSet("gohttpdisk", pflag.ContinueOnError)
 	defaultDir := filepath.Join(os.Getenv("HOME"), "gohttpdisk")
 	dir := cli.String("dir", defaultDir, "cache directory")
+	nohosts := cli.Bool("nohosts", false, "don't include hostname in cache path")
 	status := cli.Bool("status", false, "show status for a url in the cache")
 	help := cli.BoolP("help", "h", false, "show this help")
 
@@ -122,8 +124,9 @@ func cli() (*Args, error) {
 	}
 
 	return &Args{
-		dir:    *dir,
-		status: *status,
-		u:      u,
+		dir:     *dir,
+		nohosts: *nohosts,
+		status:  *status,
+		u:       u,
 	}, nil
 }

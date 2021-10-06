@@ -14,13 +14,16 @@ import (
 type Cache struct {
 	// Directory where the cache is stored. Defaults to gohttpdisk.
 	Dir string
+
+	// If true, don't include the request hostname in the path for each element.
+	NoHosts bool
 }
 
 func newCache(options Options) *Cache {
 	if options.Dir == "" {
 		options.Dir = "gohttpdisk"
 	}
-	return &Cache{options.Dir}
+	return &Cache{Dir: options.Dir, NoHosts: options.NoHosts}
 }
 
 // Get the cached data for a request. An empty byte array will be returned if
@@ -105,7 +108,7 @@ func (cache *Cache) RemoveAll() error {
 //
 
 func (cache *Cache) diskpath(cacheKey *CacheKey) string {
-	return filepath.Join(cache.Dir, cacheKey.Diskpath())
+	return filepath.Join(cache.Dir, cacheKey.Diskpath(cache.NoHosts))
 }
 
 func (cache *Cache) age(path string) time.Duration {

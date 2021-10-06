@@ -46,6 +46,9 @@ type Options struct {
 	// Only relevant if StaleWhileRevalidate is set.
 	NoCacheRevalidationErrors bool
 
+	// If true, don't include the request hostname in the path for each element.
+	NoHosts bool
+
 	// If StaleWhileRevalidate is enabled, you may optionally set this wait group
 	// to be notified when background fetches complete.
 	RevalidationWaitGroup *sync.WaitGroup
