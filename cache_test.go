@@ -14,7 +14,7 @@ func TestCacheGet(t *testing.T) {
 	//
 
 	ck := MustCacheKey(MustRequest("GET", "http://a.com/b"))
-	data, err := c.Get(ck)
+	data, _, err := c.Get(ck)
 	if len(data) != 0 {
 		t.Fatal("Get - data should be empty")
 	}
@@ -29,7 +29,7 @@ func TestCacheGet(t *testing.T) {
 	}
 
 	// now get should work
-	data, err = c.Get(ck)
+	data, _, err = c.Get(ck)
 	if err != nil {
 		t.Fatal("Get - should not have failed")
 	}

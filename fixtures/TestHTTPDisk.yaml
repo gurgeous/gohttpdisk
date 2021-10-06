@@ -1,0 +1,17 @@
+---
+version: 1
+interactions:
+  - request:
+      body: ""
+      form: {}
+      headers: {}
+      url: http://example.com/get
+      method: GET
+    response:
+      body: "body 1"
+      headers:
+        X-Request-Id:
+          - "1"
+      status: 200 OK
+      code: 200
+      duration: ""

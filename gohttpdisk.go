@@ -3,12 +3,14 @@ package gohttpdisk
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"net/http/httputil"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -26,21 +28,50 @@ type Options struct {
 	// Directory where the cache is stored. Defaults to httpdisk.
 	Dir string
 
+	// Maximum amount of time a cached response is considered fresh. If less
+	// than or equal to zero, then all content is considered fresh. If positive,
+	// then cached content will be re-fetched if it is older than this.
+	MaxAge time.Duration
+
 	// Don't read anything from cache (but still write)
 	Force bool
 
 	// Don't read errors from cache (but still write)
 	ForceErrors bool
 
+	// Optional logger
 	Logger *log.Logger
+
+	// Don't cache errors during background revalidation. Leave stale data in cache instead.
+	// Only relevant if StaleWhileRevalidate is set.
+	NoCacheRevalidationErrors bool
+
+	// If StaleWhileRevalidate is enabled, you may optionally set this wait group
+	// to be notified when background fetches complete.
+	RevalidationWaitGroup *sync.WaitGroup
+
+	// Return stale cached responses while refreshing the cache in the background.
+	// Only relevant if MaxAge is set.
+	StaleWhileRevalidate bool
+
+	// Update cache file modification time before kicking off a background revalidation.
+	// Helps guard against thundering herd problem, but risks leaving stale data in the
+	// cache longer than expected. Only relevant if StaleWhileRevalidate is set.
+	TouchBeforeRevalidate bool
 }
 
 type Status struct {
+	Age    time.Duration
 	Digest string
 	Key    string
 	Path   string
 	Status string
 	URL    string
+}
+
+type CacheEntry struct {
+	Response *http.Response
+	Age      time.Duration
 }
 
 const errPrefix = "err:"
@@ -57,7 +88,7 @@ func (hd *HTTPDisk) Status(req *http.Request) (*Status, error) {
 	}
 
 	// what is the status?
-	data, _ := hd.Cache.Get(cacheKey)
+	data, age, _ := hd.Cache.Get(cacheKey)
 	var status string
 	if len(data) == 0 {
 		status = "miss"
@@ -68,6 +99,7 @@ func (hd *HTTPDisk) Status(req *http.Request) (*Status, error) {
 	}
 
 	return &Status{
+		Age:    age,
 		Digest: cacheKey.Digest(),
 		Key:    cacheKey.Key(),
 		Path:   hd.Cache.diskpath(cacheKey),
@@ -76,41 +108,59 @@ func (hd *HTTPDisk) Status(req *http.Request) (*Status, error) {
 	}, nil
 }
 
-// RoundTrip is the entry point used by http.Client.
-func (hd *HTTPDisk) RoundTrip(req *http.Request) (*http.Response, error) {
-	var resp *http.Response
-
-	transport := hd.Transport
-	if transport == nil {
-		transport = http.DefaultTransport
-	}
-
+func (hd *HTTPDisk) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	cacheKey, err := NewCacheKey(req)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get our cached response unless Force is on, in which case we ignore cached data
-	if !hd.Options.Force {
-		resp, err = hd.get(cacheKey)
+	//
+	// Try to read response from cache
+	//
 
-		// Handle the following possible cases for cached data:
-		//  1. Network error: use cache if ForceErrors=false, otherwise hit network
-		//  2. HTTP 400 or 500: use cache if ForceErrors=false, otherwise hit network
-		//  3. HTTP 200 or 300: use cache
-		//  4. Nothing in cache: hit network
+	entry, err := hd.get(cacheKey)
+	if err != nil {
+		return nil, err
+	}
 
-		if err != nil {
-			if !hd.Options.ForceErrors {
-				// Return cached network error
-				return nil, err
-			}
-		} else if resp != nil {
-			if resp.StatusCode < 400 || !hd.Options.ForceErrors {
-				// Return cached response
-				return resp, nil
-			}
+	if entry != nil {
+		resp = entry.Response
+	}
+
+	//
+	// Handle stale responses
+	//
+
+	if hd.isStale(entry) {
+		if hd.Options.StaleWhileRevalidate {
+			// Revalidate in the background while returning stale data.
+			hd.backgroundRevalidate(req, cacheKey)
+		} else {
+			// Must fetch and return fresh data. Drop the stale data.
+			resp = nil
 		}
+	}
+
+	//
+	// Make network request if necessary
+	//
+
+	if resp == nil {
+		// not found. make the request.
+		resp, err = hd.fetch(req, cacheKey, true)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return resp, nil
+}
+
+// Fetch a response over the network
+func (hd *HTTPDisk) fetch(req *http.Request, cacheKey *CacheKey, cacheErrors bool) (resp *http.Response, err error) {
+	transport := hd.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
 	}
 
 	// not found. make the request
@@ -121,11 +171,22 @@ func (hd *HTTPDisk) RoundTrip(req *http.Request) (*http.Response, error) {
 	start := time.Now()
 	resp, err = transport.RoundTrip(req)
 	if err != nil {
-		return nil, hd.handleError(cacheKey, err)
+		if hd.Options.Logger != nil {
+			hd.Options.Logger.Printf("Network error on %s (%s)", req.URL, err)
+		}
+
+		if cacheErrors {
+			err = hd.handleError(cacheKey, err)
+		}
+		return nil, err
+	}
+
+	if hd.Options.Logger != nil && isHttpError(resp) {
+		hd.Options.Logger.Printf("Http error on %s (%s)", req.URL, resp.Status)
 	}
 
 	// cache response
-	err = hd.set(cacheKey, resp, start)
+	err = hd.set(cacheKey, resp, start, cacheErrors)
 	if err != nil {
 		return nil, err
 	}
@@ -133,14 +194,62 @@ func (hd *HTTPDisk) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-// get cached response for this request, if any
-func (hd *HTTPDisk) get(cacheKey *CacheKey) (*http.Response, error) {
-	// cacheKey, err := NewCacheKey(req)
-	// if err != nil {
-	// 	return nil, err
-	// }
+// Launch goroutine to refresh the cache
+func (hd *HTTPDisk) backgroundRevalidate(req *http.Request, cacheKey *CacheKey) {
+	// If configured, update timestamp on old file before proceeding. Protection
+	// against thundering herd.
+	if hd.Options.TouchBeforeRevalidate {
+		hd.Cache.Touch(cacheKey)
+	}
 
-	data, err := hd.Cache.Get(cacheKey)
+	if hd.Options.RevalidationWaitGroup != nil {
+		hd.Options.RevalidationWaitGroup.Add(1)
+	}
+
+	// Clone the request so that we can reissue it without being tied
+	// to the current request context. Otherwise we risk being cancelled
+	// when the main thread returns.
+	req = req.Clone(context.Background())
+
+	// Perform fetch in goroutine
+	go func() {
+		if hd.Options.RevalidationWaitGroup != nil {
+			defer hd.Options.RevalidationWaitGroup.Done()
+		}
+		hd.fetch(req, cacheKey, !hd.Options.NoCacheRevalidationErrors)
+	}()
+}
+
+// Get cached response for this request. Honors Force and ForceErrors
+// but may return stale data.
+func (hd *HTTPDisk) get(cacheKey *CacheKey) (*CacheEntry, error) {
+	if hd.Options.Force {
+		// Ignore cached data if Force is on
+		return nil, nil
+	}
+
+	entry, err := hd.readFromCache(cacheKey)
+
+	//
+	// If ForceErrors is on, drop all cached errors
+	//
+
+	if hd.Options.ForceErrors {
+		// Drop cached network errors
+		err = nil
+
+		// Drop cached http errors
+		if entry != nil && isHttpError(entry.Response) {
+			entry = nil
+		}
+	}
+
+	return entry, err
+}
+
+// get cached response for this request, if any
+func (hd *HTTPDisk) readFromCache(cacheKey *CacheKey) (*CacheEntry, error) {
+	data, age, err := hd.Cache.Get(cacheKey)
 	if len(data) == 0 {
 		return nil, nil
 	}
@@ -155,22 +264,34 @@ func (hd *HTTPDisk) get(cacheKey *CacheKey) (*http.Response, error) {
 	}
 
 	buf := bytes.NewBuffer(data)
-	return http.ReadResponse(bufio.NewReader(buf), cacheKey.Request)
+	resp, err := http.ReadResponse(bufio.NewReader(buf), cacheKey.Request)
+	if err != nil {
+		return nil, err
+	}
+	return &CacheEntry{Response: resp, Age: age}, nil
 }
 
 // set cached response
-func (hd *HTTPDisk) set(cacheKey *CacheKey, resp *http.Response, start time.Time) error {
+func (hd *HTTPDisk) set(cacheKey *CacheKey, resp *http.Response, start time.Time, cacheErrors bool) error {
 	// drain body, put back into Response
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		// errors can occur here if the server returns an invalid body. handle that
 		// case and consider caching the error
-		return hd.handleError(cacheKey, err)
+		if cacheErrors {
+			err = hd.handleError(cacheKey, err)
+		}
+		return err
 	}
 	resp.Body = ioutil.NopCloser(bytes.NewBuffer(body))
-	elapsed := float64(time.Since(start)) / float64(time.Second)
+
+	// short circuit for http errors if cacheErrors=false
+	if !cacheErrors && isHttpError(resp) {
+		return nil
+	}
 
 	// add our headers
+	elapsed := float64(time.Since(start)) / float64(time.Second)
 	resp.Header.Set("X-Gohttpdisk-Elapsed", fmt.Sprintf("%0.3f", elapsed))
 	resp.Header.Set("X-Gohttpdisk-Url", cacheKey.Request.URL.String())
 
@@ -210,6 +331,10 @@ func (hd *HTTPDisk) setError(cacheKey *CacheKey, err error) error {
 	return nil
 }
 
+func (hd *HTTPDisk) isStale(entry *CacheEntry) bool {
+	return entry != nil && hd.Options.MaxAge > 0 && entry.Age > hd.Options.MaxAge
+}
+
 // if err.Error() contains one of these, we consider the error to be cacheable
 // and we write it to disk. This list was generated by hitting the tranco top
 // 1000 websites.
@@ -241,4 +366,8 @@ func isCacheableError(err error) bool {
 
 	fmt.Printf("isCacheableError? type:%T v:%v\n", err, err)
 	return false
+}
+
+func isHttpError(resp *http.Response) bool {
+	return resp.StatusCode >= 400
 }

@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // Cache will cache http.Responses on disk, using the http.Request to calculate
@@ -24,20 +25,24 @@ func newCache(options Options) *Cache {
 
 // Get the cached data for a request. An empty byte array will be returned if
 // the entry doesn't exist or can't be read for any reason.
-func (cache *Cache) Get(cacheKey *CacheKey) ([]byte, error) {
-	f, err := os.Open(cache.diskpath(cacheKey))
+func (cache *Cache) Get(cacheKey *CacheKey) (data []byte, age time.Duration, err error) {
+	path := cache.diskpath(cacheKey)
+	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return
 	}
 	defer f.Close()
 
 	gz, err := gzip.NewReader(f)
 	if err != nil {
-		return nil, err
+		return
 	}
 	defer gz.Close()
 
-	return ioutil.ReadAll(gz)
+	age = cache.age(path)
+	data, err = ioutil.ReadAll(gz)
+
+	return
 }
 
 // Set cached data for a request.
@@ -77,6 +82,19 @@ func (cache *Cache) Set(cacheKey *CacheKey, data []byte) error {
 	return nil
 }
 
+// Update the modified time if the cached file exists.
+func (cache *Cache) Touch(cacheKey *CacheKey) error {
+	path := cache.diskpath(cacheKey)
+	_, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		// Do nothing if the file doesn't exist
+		return nil
+	}
+
+	currentTime := time.Now()
+	return os.Chtimes(path, currentTime, currentTime)
+}
+
 // RemoveAll unlinks the cache.
 func (cache *Cache) RemoveAll() error {
 	return os.RemoveAll(cache.Dir)
@@ -88,4 +106,13 @@ func (cache *Cache) RemoveAll() error {
 
 func (cache *Cache) diskpath(cacheKey *CacheKey) string {
 	return filepath.Join(cache.Dir, cacheKey.Diskpath())
+}
+
+func (cache *Cache) age(path string) time.Duration {
+	stat, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+
+	return time.Since(stat.ModTime())
 }
