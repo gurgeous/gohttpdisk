@@ -134,7 +134,7 @@ func (hd *HTTPDisk) RoundTrip(req *http.Request) (resp *http.Response, err error
 	if hd.isStale(entry) {
 		if hd.Options.StaleWhileRevalidate {
 			// Revalidate in the background while returning stale data.
-			hd.backgroundRevalidate(req)
+			hd.backgroundRevalidate(req, cacheKey)
 		} else {
 			// Must fetch and return fresh data. Drop the stale data.
 			resp = nil
@@ -147,7 +147,7 @@ func (hd *HTTPDisk) RoundTrip(req *http.Request) (resp *http.Response, err error
 
 	if resp == nil {
 		// not found. make the request.
-		resp, err = hd.fetch(req, true)
+		resp, err = hd.fetch(req, cacheKey, true)
 		if err != nil {
 			return nil, err
 		}
@@ -157,15 +157,10 @@ func (hd *HTTPDisk) RoundTrip(req *http.Request) (resp *http.Response, err error
 }
 
 // Fetch a response over the network
-func (hd *HTTPDisk) fetch(req *http.Request, cacheErrors bool) (resp *http.Response, err error) {
+func (hd *HTTPDisk) fetch(req *http.Request, cacheKey *CacheKey, cacheErrors bool) (resp *http.Response, err error) {
 	transport := hd.Transport
 	if transport == nil {
 		transport = http.DefaultTransport
-	}
-
-	cacheKey, err := NewCacheKey(req)
-	if err != nil {
-		return nil, err
 	}
 
 	// not found. make the request
@@ -200,14 +195,11 @@ func (hd *HTTPDisk) fetch(req *http.Request, cacheErrors bool) (resp *http.Respo
 }
 
 // Launch goroutine to refresh the cache
-func (hd *HTTPDisk) backgroundRevalidate(req *http.Request) {
+func (hd *HTTPDisk) backgroundRevalidate(req *http.Request, cacheKey *CacheKey) {
 	// If configured, update timestamp on old file before proceeding. Protection
 	// against thundering herd.
 	if hd.Options.TouchBeforeRevalidate {
-		cacheKey, err := NewCacheKey(req)
-		if err == nil {
-			hd.Cache.Touch(cacheKey)
-		}
+		hd.Cache.Touch(cacheKey)
 	}
 
 	if hd.Options.RevalidationWaitGroup != nil {
@@ -224,7 +216,7 @@ func (hd *HTTPDisk) backgroundRevalidate(req *http.Request) {
 		if hd.Options.RevalidationWaitGroup != nil {
 			defer hd.Options.RevalidationWaitGroup.Done()
 		}
-		hd.fetch(req, !hd.Options.NoCacheRevalidationErrors)
+		hd.fetch(req, cacheKey, !hd.Options.NoCacheRevalidationErrors)
 	}()
 }
 
